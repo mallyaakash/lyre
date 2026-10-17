@@ -1,0 +1,56 @@
+[package]
+name = "lyre"
+version = "0.1.0"
+edition = "2021"
+description = "Lightweight, ultra-fast Windows desktop utility for single-click audio input/output switching"
+authors = ["Lyre Contributors"]
+
+[dependencies]
+eframe = { version = "0.29", default-features = false, features = [
+    "default_fonts",
+    "glow",
+    "persistence",
+] }
+egui = "0.29"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "ico", "bmp", "webp"] }
+resvg = "0.43"
+tray-icon = "0.19"
+muda = "0.15"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+directories = "5.0"
+rfd = "0.15"
+raw-window-handle = "0.6"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+log = "0.4"
+env_logger = "0.11"
+
+[dependencies.windows]
+version = "0.58"
+features = [
+    "implement",
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+]
+
+[dependencies.windows-core]
+version = "0.58"
+
+[build-dependencies]
+winresource = "0.1"
+image = { version = "0.25", default-features = false, features = ["png", "ico"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
