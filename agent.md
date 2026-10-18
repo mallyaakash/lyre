@@ -145,7 +145,17 @@
   - [x] Redesign the Customize Button window with modern section cards, visual SVG icon tiles for the 7 presets, and a prominent, distinct **"Upload Custom Image (.png, .webp, .svg, .ico, .jpg)"** banner button with live image preview.
 - [x] **8.4** Initialize Git repository (`git init`, `.gitignore`, initial commit) and run **Verification Gate 8** (`cargo test`, `cargo build --release`, and launch).
 
+### Checkpoint 9: Linear / Raycast Matte Obsidian UI/UX Redesign
+- [x] **9.1** Remove all two-tone half-rect reflection bands (`upper_glass_rect`, `sheen_rect`) across buttons, pills, color swatches, preset tiles, and upload cards (`src/ui/button_widget.rs`, `src/ui/settings_panel.rs`).
+- [x] **9.2** Implement **Linear / Raycast Matte Obsidian** palette & styling (`src/ui/theme.rs`, `src/ui/button_widget.rs`, `src/app.rs`):
+  - [x] Deep carbon canvas (`#0D0E11` in Dark Mode; `#F4F5F8` in Light Mode).
+  - [x] Uniform matte button cards (`#15171C` idle, `#1C1F26` hover, uniform subtle 10% full-card accent tint when active) with crisp `1px` hairline borders (`#252830` idle, smooth accent border when hovered/active) and a single subtle `1px` top-edge rim highlight.
+  - [x] Subtle rounded squircle icon well behind preset icons (or clean un-clipped showcase for custom transparent artwork) + refined typography.
+  - [x] Flush studio rectangular LED indicator (`#22C55E` green when active, `#EF4444` red when muted, `#1E2129` recessed matte slot when unused).
+- [x] **9.3** Refine Top Config Bar & Customize Button Dialog (`src/ui/settings_panel.rs`) to match the Linear / Raycast Matte Obsidian design language (uniform matte section cards, clean hairline borders, custom-painted toggle switches instead of default checkboxes, and zero two-tone bands).
+- [x] **9.4** **Verification Gate 9:** Run `cargo test`, build release binary (`cargo build --release`), commit to Git, and launch.
+
 ---
 
 ## Checkpoint Progress Log
-- **Current Phase:** All Checkpoints (0 through 8) Completed and Verified.
+- **Current Phase:** All Checkpoints (0 through 9) Completed and Verified.

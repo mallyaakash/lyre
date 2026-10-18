@@ -328,8 +328,8 @@ impl LyreApp {
 impl eframe::App for LyreApp {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         match self.config.window.theme_mode {
-            ThemeMode::Dark => [17.0 / 255.0, 17.0 / 255.0, 19.0 / 255.0, 1.0],
-            ThemeMode::Light => [244.0 / 255.0, 244.0 / 255.0, 246.0 / 255.0, 1.0],
+            ThemeMode::Dark => [13.0 / 255.0, 14.0 / 255.0, 17.0 / 255.0, 1.0],
+            ThemeMode::Light => [244.0 / 255.0, 245.0 / 255.0, 248.0 / 255.0, 1.0],
         }
     }
 
@@ -396,12 +396,12 @@ impl eframe::App for LyreApp {
             let mut enter_minimalist = false;
             let (bar_bg, bar_border) = match self.config.window.theme_mode {
                 ThemeMode::Dark => (
-                    Color32::from_rgb(20, 20, 23),
-                    Color32::from_rgb(38, 38, 44),
+                    Color32::from_rgb(16, 18, 22),
+                    Color32::from_rgb(34, 37, 46),
                 ),
                 ThemeMode::Light => (
-                    Color32::from_rgb(246, 246, 249),
-                    Color32::from_rgb(220, 220, 226),
+                    Color32::from_rgb(248, 249, 252),
+                    Color32::from_rgb(218, 222, 232),
                 ),
             };
 
@@ -441,12 +441,12 @@ impl eframe::App for LyreApp {
 
         // 7. Central Responsive Button Grid
         let panel_bg = match self.config.window.theme_mode {
-            ThemeMode::Dark => Color32::from_rgb(17, 17, 19),
-            ThemeMode::Light => Color32::from_rgb(244, 244, 246),
+            ThemeMode::Dark => Color32::from_rgb(13, 14, 17),
+            ThemeMode::Light => Color32::from_rgb(244, 245, 248),
         };
 
         CentralPanel::default()
-            .frame(EguiFrame::none().fill(panel_bg).inner_margin(Margin::same(2.0)))
+            .frame(EguiFrame::none().fill(panel_bg).inner_margin(Margin::same(3.0)))
             .show(ctx, |ui| {
                 let viewport_rect = ui.max_rect();
                 let in_resize_zone = self.handle_frameless_edge_resize(ctx, viewport_rect);

@@ -26,7 +26,8 @@ pub struct EditorState {
     pub was_open: bool,
 }
 
-/// Custom-painted sleek minimalist pill button for the top toolbar and modal controls.
+/// Custom-painted uniform matte pill button (**Linear / Raycast Matte Obsidian** style,
+/// zero two-tone bands, crisp 1px hairline border).
 pub fn pill_button(
     ui: &mut Ui,
     text: &str,
@@ -49,61 +50,61 @@ pub fn pill_button(
         ThemeMode::Dark => {
             if accent_highlight {
                 let bg = if response.hovered() {
-                    Color32::from_rgb(60, 62, 72)
+                    Color32::from_rgb(44, 48, 59)
                 } else {
-                    Color32::from_rgb(44, 46, 54)
+                    Color32::from_rgb(33, 36, 45)
                 };
                 (
                     bg,
-                    Color32::from_rgb(105, 108, 124),
-                    Color32::from_rgb(248, 248, 252),
+                    Color32::from_rgb(76, 82, 98),
+                    Color32::from_rgb(248, 249, 252),
                 )
             } else if active_state {
                 let bg = if response.hovered() {
-                    Color32::from_rgb(50, 52, 60)
+                    Color32::from_rgb(38, 42, 51)
                 } else {
-                    Color32::from_rgb(38, 40, 47)
+                    Color32::from_rgb(28, 31, 38)
                 };
                 (
                     bg,
-                    Color32::from_rgb(86, 89, 102),
-                    Color32::from_rgb(242, 242, 247),
+                    Color32::from_rgb(62, 67, 82),
+                    Color32::from_rgb(240, 242, 248),
                 )
             } else {
                 let bg = if response.hovered() {
-                    Color32::from_rgb(36, 37, 43)
+                    Color32::from_rgb(29, 32, 39)
                 } else {
-                    Color32::from_rgb(26, 27, 31)
+                    Color32::from_rgb(21, 23, 28)
                 };
                 (
                     bg,
-                    Color32::from_rgb(52, 54, 62),
-                    Color32::from_rgb(192, 194, 204),
+                    Color32::from_rgb(40, 44, 54),
+                    Color32::from_rgb(190, 195, 208),
                 )
             }
         }
         ThemeMode::Light => {
             if accent_highlight || active_state {
                 let bg = if response.hovered() {
-                    Color32::from_rgb(214, 216, 226)
+                    Color32::from_rgb(220, 224, 234)
                 } else {
-                    Color32::from_rgb(225, 227, 235)
+                    Color32::from_rgb(230, 233, 242)
                 };
                 (
                     bg,
-                    Color32::from_rgb(174, 178, 190),
-                    Color32::from_rgb(20, 20, 24),
+                    Color32::from_rgb(184, 190, 204),
+                    Color32::from_rgb(20, 22, 28),
                 )
             } else {
                 let bg = if response.hovered() {
-                    Color32::from_rgb(230, 232, 238)
+                    Color32::from_rgb(234, 236, 243)
                 } else {
-                    Color32::from_rgb(240, 241, 246)
+                    Color32::from_rgb(244, 245, 249)
                 };
                 (
                     bg,
-                    Color32::from_rgb(204, 206, 216),
-                    Color32::from_rgb(60, 62, 70),
+                    Color32::from_rgb(210, 214, 224),
+                    Color32::from_rgb(60, 64, 74),
                 )
             }
         }
@@ -111,21 +112,6 @@ pub fn pill_button(
 
     let rounding = Rounding::same(6.5);
     ui.painter().rect_filled(rect, rounding, bg_fill);
-    // Subtle top glass sheen on pill buttons
-    let sheen_rect = Rect::from_min_max(
-        rect.min + Vec2::new(1.0, 1.0),
-        Pos2::new(rect.max.x - 1.0, rect.center().y),
-    );
-    ui.painter().rect_filled(
-        sheen_rect,
-        Rounding {
-            nw: 5.5,
-            ne: 5.5,
-            sw: 0.0,
-            se: 0.0,
-        },
-        Color32::from_rgba_unmultiplied(255, 255, 255, 10),
-    );
     ui.painter()
         .rect_stroke(rect, rounding, Stroke::new(1.0, border_col));
     ui.painter().text(
@@ -137,6 +123,72 @@ pub fn pill_button(
     );
 
     response
+}
+
+/// Custom-painted Linear / iOS style pill toggle switch (`true` / `false`).
+fn draw_toggle_switch(
+    ui: &mut Ui,
+    value: &mut bool,
+    label: &str,
+    accent: Color32,
+    theme_mode: ThemeMode,
+) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        let switch_size = Vec2::new(34.0, 19.0);
+        let (rect, resp) = ui.allocate_exact_size(switch_size, Sense::click());
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+        }
+        if resp.clicked() {
+            *value = !*value;
+            changed = true;
+        }
+
+        let rounding = Rounding::same(9.5);
+        let (track_bg, track_border) = if *value {
+            (accent, accent)
+        } else {
+            match theme_mode {
+                ThemeMode::Dark => (
+                    Color32::from_rgb(30, 33, 41),
+                    Color32::from_rgb(52, 56, 68),
+                ),
+                ThemeMode::Light => (
+                    Color32::from_rgb(214, 218, 228),
+                    Color32::from_rgb(186, 192, 204),
+                ),
+            }
+        };
+
+        ui.painter().rect_filled(rect, rounding, track_bg);
+        ui.painter()
+            .rect_stroke(rect, rounding, Stroke::new(1.0, track_border));
+
+        let knob_r = 6.8;
+        let knob_x = if *value {
+            rect.right() - 9.5
+        } else {
+            rect.left() + 9.5
+        };
+        ui.painter().circle_filled(
+            Pos2::new(knob_x, rect.center().y),
+            knob_r,
+            Color32::WHITE,
+        );
+
+        let label_resp = ui.add(
+            egui::Label::new(RichText::new(label).size(12.5)).sense(Sense::click()),
+        );
+        if label_resp.hovered() {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+        }
+        if label_resp.clicked() {
+            *value = !*value;
+            changed = true;
+        }
+    });
+    changed
 }
 
 /// Renders the top Edit/Configuration toolbar when Lyre is in Configuration / Edit Mode.
@@ -151,8 +203,8 @@ pub fn render_top_config_bar(
     let mut changed = false;
     let theme = config.window.theme_mode;
     let muted_text = match theme {
-        ThemeMode::Dark => Color32::from_rgb(160, 160, 170),
-        ThemeMode::Light => Color32::from_rgb(90, 90, 100),
+        ThemeMode::Dark => Color32::from_rgb(148, 154, 168),
+        ThemeMode::Light => Color32::from_rgb(90, 95, 108),
     };
 
     ui.horizontal_wrapped(|ui| {
@@ -194,7 +246,7 @@ pub fn render_top_config_bar(
             ThemeMode::Light => "Theme: Light",
         };
         if pill_button(ui, theme_label, true, false, theme)
-            .on_hover_text("Switch between Dark Mode (colored outline) and Light Mode (colored fill)")
+            .on_hover_text("Switch between Dark Mode (Matte Obsidian) and Light Mode")
             .clicked()
         {
             config.window.theme_mode = match config.window.theme_mode {
@@ -343,16 +395,16 @@ pub fn render_button_editor_modal(
 
         let (panel_bg, card_bg, card_border, label_muted) = match theme {
             ThemeMode::Dark => (
-                Color32::from_rgb(16, 16, 19),
-                Color32::from_rgb(23, 24, 28),
-                Color32::from_rgb(42, 44, 52),
-                Color32::from_rgb(156, 160, 174),
+                Color32::from_rgb(13, 14, 17),   // #0D0E11 carbon canvas
+                Color32::from_rgb(20, 22, 27),   // #14161B matte card
+                Color32::from_rgb(36, 39, 48),   // #242730 hairline border
+                Color32::from_rgb(142, 148, 164),
             ),
             ThemeMode::Light => (
-                Color32::from_rgb(243, 244, 248),
-                Color32::from_rgb(252, 252, 254),
-                Color32::from_rgb(218, 220, 228),
-                Color32::from_rgb(100, 104, 118),
+                Color32::from_rgb(244, 245, 248),
+                Color32::from_rgb(255, 255, 255),
+                Color32::from_rgb(218, 222, 232),
+                Color32::from_rgb(100, 105, 118),
             ),
         };
 
@@ -513,18 +565,25 @@ pub fn render_button_editor_modal(
                         }
                     });
 
+                    ui.add_space(2.0);
                     ui.horizontal(|ui| {
-                        if ui
-                            .checkbox(&mut btn.show_label, "Show Text Title")
-                            .changed()
-                        {
+                        if draw_toggle_switch(
+                            ui,
+                            &mut btn.show_label,
+                            "Show Text Title",
+                            accent_color,
+                            theme,
+                        ) {
                             changed = true;
                         }
-                        ui.add_space(12.0);
-                        if ui
-                            .checkbox(&mut btn.badge_enabled, "Corner Number Badge")
-                            .changed()
-                        {
+                        ui.add_space(14.0);
+                        if draw_toggle_switch(
+                            ui,
+                            &mut btn.badge_enabled,
+                            "Corner Number Badge",
+                            accent_color,
+                            theme,
+                        ) {
                             changed = true;
                         }
                         if btn.badge_enabled {
@@ -561,27 +620,13 @@ pub fn render_button_editor_modal(
                                 if resp.hovered() {
                                     ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
                                 }
+                                // Uniform matte swatch (zero two-tone band)
                                 ui.painter().rect_filled(rect, 6.0, c);
-                                // Glass top sheen on swatch
-                                let sheen = Rect::from_min_max(
-                                    rect.min + Vec2::new(1.0, 1.0),
-                                    Pos2::new(rect.max.x - 1.0, rect.center().y),
-                                );
-                                ui.painter().rect_filled(
-                                    sheen,
-                                    Rounding {
-                                        nw: 5.0,
-                                        ne: 5.0,
-                                        sw: 0.0,
-                                        se: 0.0,
-                                    },
-                                    Color32::from_rgba_unmultiplied(255, 255, 255, 45),
-                                );
                                 if is_sel {
                                     ui.painter().rect_stroke(
                                         rect.expand(1.5),
                                         7.0,
-                                        Stroke::new(2.0, Color32::WHITE),
+                                        Stroke::new(1.8, Color32::WHITE),
                                     );
                                 }
                                 if resp.clicked() {
@@ -610,8 +655,9 @@ pub fn render_button_editor_modal(
                     let avail_w = ui.available_width();
                     let cols_count = 4usize;
                     let spacing = 6.0;
-                    let tile_w =
-                        ((avail_w - spacing * (cols_count as f32 - 1.0)) / cols_count as f32).max(72.0);
+                    let tile_w = ((avail_w - spacing * (cols_count as f32 - 1.0))
+                        / cols_count as f32)
+                        .max(72.0);
                     let tile_h = 54.0;
 
                     for row in PresetIcon::ALL.chunks(cols_count) {
@@ -751,7 +797,7 @@ pub fn render_button_editor_modal(
     changed
 }
 
-/// Draws a modern segmented card for selecting `Output Device` vs `Input Device` with a vector icon.
+/// Draws a uniform matte segmented card for selecting `Output Device` vs `Input Device`.
 #[allow(clippy::too_many_arguments)]
 fn draw_direction_segment_tile(
     ui: &mut Ui,
@@ -774,39 +820,39 @@ fn draw_direction_segment_tile(
         ThemeMode::Dark => {
             if selected {
                 (
-                    Color32::from_rgba_unmultiplied(ar, ag, ab, 36),
+                    Color32::from_rgba_unmultiplied(ar, ag, ab, 28),
                     accent,
                     Color32::WHITE,
-                    Color32::from_rgb(195, 200, 214),
+                    Color32::from_rgb(188, 194, 210),
                 )
             } else if resp.hovered() {
                 (
-                    Color32::from_rgb(34, 35, 42),
-                    Color32::from_rgb(72, 74, 86),
+                    Color32::from_rgb(28, 31, 38),
+                    Color32::from_rgb(64, 69, 82),
                     Color32::from_rgb(230, 232, 240),
-                    Color32::from_rgb(148, 152, 166),
+                    Color32::from_rgb(144, 150, 166),
                 )
             } else {
                 (
-                    Color32::from_rgb(28, 29, 34),
-                    Color32::from_rgb(50, 52, 60),
-                    Color32::from_rgb(205, 208, 218),
-                    Color32::from_rgb(132, 136, 150),
+                    Color32::from_rgb(16, 18, 22),
+                    Color32::from_rgb(38, 41, 50),
+                    Color32::from_rgb(202, 206, 218),
+                    Color32::from_rgb(126, 132, 146),
                 )
             }
         }
         ThemeMode::Light => {
             if selected {
                 (
-                    Color32::from_rgba_unmultiplied(ar, ag, ab, 32),
+                    Color32::from_rgba_unmultiplied(ar, ag, ab, 26),
                     accent,
                     Color32::from_rgb(18, 20, 26),
                     Color32::from_rgb(70, 74, 86),
                 )
             } else {
                 (
-                    Color32::from_rgb(242, 243, 247),
-                    Color32::from_rgb(206, 208, 218),
+                    Color32::from_rgb(245, 246, 250),
+                    Color32::from_rgb(210, 214, 224),
                     Color32::from_rgb(40, 42, 50),
                     Color32::from_rgb(110, 114, 126),
                 )
@@ -819,7 +865,7 @@ fn draw_direction_segment_tile(
     ui.painter().rect_stroke(
         rect,
         rounding,
-        Stroke::new(if selected { 1.6 } else { 1.0 }, border),
+        Stroke::new(if selected { 1.5 } else { 1.0 }, border),
     );
 
     let icon_rect = Rect::from_center_size(
@@ -853,7 +899,7 @@ fn draw_direction_segment_tile(
     resp
 }
 
-/// Draws a visual icon tile for one of the 7 built-in studio SVG presets.
+/// Draws a uniform matte visual icon tile for one of the 7 built-in studio SVG presets.
 fn draw_preset_icon_tile(
     ui: &mut Ui,
     size: Vec2,
@@ -873,39 +919,39 @@ fn draw_preset_icon_tile(
         ThemeMode::Dark => {
             if selected {
                 (
-                    Color32::from_rgba_unmultiplied(ar, ag, ab, 42),
+                    Color32::from_rgba_unmultiplied(ar, ag, ab, 32),
                     accent,
                     Color32::WHITE,
                     Color32::WHITE,
                 )
             } else if resp.hovered() {
                 (
-                    Color32::from_rgb(36, 38, 45),
-                    Color32::from_rgb(82, 85, 98),
+                    Color32::from_rgb(28, 31, 38),
+                    Color32::from_rgb(68, 73, 86),
                     Color32::from_rgb(240, 242, 248),
                     Color32::from_rgb(230, 232, 240),
                 )
             } else {
                 (
-                    Color32::from_rgb(28, 29, 35),
-                    Color32::from_rgb(48, 50, 58),
-                    Color32::from_rgb(190, 195, 208),
-                    Color32::from_rgb(176, 180, 194),
+                    Color32::from_rgb(16, 18, 22),
+                    Color32::from_rgb(38, 41, 50),
+                    Color32::from_rgb(186, 192, 206),
+                    Color32::from_rgb(172, 178, 192),
                 )
             }
         }
         ThemeMode::Light => {
             if selected {
                 (
-                    Color32::from_rgba_unmultiplied(ar, ag, ab, 36),
+                    Color32::from_rgba_unmultiplied(ar, ag, ab, 28),
                     accent,
                     Color32::from_rgb(18, 20, 26),
                     Color32::from_rgb(18, 20, 26),
                 )
             } else {
                 (
-                    Color32::from_rgb(242, 243, 247),
-                    Color32::from_rgb(206, 208, 218),
+                    Color32::from_rgb(245, 246, 250),
+                    Color32::from_rgb(210, 214, 224),
                     Color32::from_rgb(55, 58, 68),
                     Color32::from_rgb(65, 68, 78),
                 )
@@ -914,26 +960,12 @@ fn draw_preset_icon_tile(
     };
 
     let rounding = Rounding::same(8.0);
+    // Uniform matte tile fill (zero two-tone band)
     ui.painter().rect_filled(rect, rounding, bg);
-    // Subtle top glass sheen on preset tile
-    let sheen = Rect::from_min_max(
-        rect.min + Vec2::new(1.0, 1.0),
-        Pos2::new(rect.max.x - 1.0, rect.center().y),
-    );
-    ui.painter().rect_filled(
-        sheen,
-        Rounding {
-            nw: 7.0,
-            ne: 7.0,
-            sw: 0.0,
-            se: 0.0,
-        },
-        Color32::from_rgba_unmultiplied(255, 255, 255, 10),
-    );
     ui.painter().rect_stroke(
         rect,
         rounding,
-        Stroke::new(if selected { 1.8 } else { 1.0 }, border),
+        Stroke::new(if selected { 1.5 } else { 1.0 }, border),
     );
 
     let icon_rect = Rect::from_center_size(
@@ -960,7 +992,7 @@ fn draw_preset_icon_tile(
     resp
 }
 
-/// Draws a prominent, visually distinct full-width action card for uploading a custom image
+/// Draws a prominent, visually distinct full-width matte card for uploading a custom image
 /// (`.png`, `.webp`, `.svg`, `.ico`, `.jpg`), including a live thumbnail preview when active.
 fn draw_prominent_upload_button(
     ui: &mut Ui,
@@ -981,64 +1013,48 @@ fn draw_prominent_upload_button(
     let (bg_fill, border_col, title_col, sub_col, badge_bg) = match theme {
         ThemeMode::Dark => {
             let bg = if resp.hovered() {
-                Color32::from_rgba_unmultiplied(ar, ag, ab, 48)
+                Color32::from_rgba_unmultiplied(ar, ag, ab, 32)
             } else if is_custom {
-                Color32::from_rgba_unmultiplied(ar, ag, ab, 36)
+                Color32::from_rgba_unmultiplied(ar, ag, ab, 24)
             } else {
-                Color32::from_rgba_unmultiplied(ar, ag, ab, 22)
+                Color32::from_rgba_unmultiplied(ar, ag, ab, 15)
             };
             let border = if resp.hovered() || is_custom {
                 accent
             } else {
-                Color32::from_rgba_unmultiplied(ar, ag, ab, 175)
+                Color32::from_rgba_unmultiplied(ar, ag, ab, 145)
             };
             (
                 bg,
                 border,
                 Color32::WHITE,
-                Color32::from_rgb(190, 196, 210),
-                Color32::from_rgba_unmultiplied(ar, ag, ab, 65),
+                Color32::from_rgb(182, 188, 204),
+                Color32::from_rgba_unmultiplied(ar, ag, ab, 48),
             )
         }
         ThemeMode::Light => {
             let bg = if resp.hovered() {
-                Color32::from_rgba_unmultiplied(ar, ag, ab, 40)
+                Color32::from_rgba_unmultiplied(ar, ag, ab, 32)
             } else {
-                Color32::from_rgba_unmultiplied(ar, ag, ab, 22)
+                Color32::from_rgba_unmultiplied(ar, ag, ab, 16)
             };
             (
                 bg,
                 accent,
                 Color32::from_rgb(18, 20, 26),
                 Color32::from_rgb(75, 80, 94),
-                Color32::from_rgba_unmultiplied(ar, ag, ab, 45),
+                Color32::from_rgba_unmultiplied(ar, ag, ab, 36),
             )
         }
     };
 
     let rounding = Rounding::same(9.0);
+    // Uniform matte background (zero two-tone band)
     ui.painter().rect_filled(rect, rounding, bg_fill);
-
-    // Top glassy reflection band
-    let sheen = Rect::from_min_max(
-        rect.min + Vec2::new(1.0, 1.0),
-        Pos2::new(rect.max.x - 1.0, rect.center().y),
-    );
-    ui.painter().rect_filled(
-        sheen,
-        Rounding {
-            nw: 8.0,
-            ne: 8.0,
-            sw: 0.0,
-            se: 0.0,
-        },
-        Color32::from_rgba_unmultiplied(255, 255, 255, 16),
-    );
-
     ui.painter().rect_stroke(
         rect,
         rounding,
-        Stroke::new(if is_custom || resp.hovered() { 1.8 } else { 1.3 }, border_col),
+        Stroke::new(if is_custom || resp.hovered() { 1.6 } else { 1.1 }, border_col),
     );
 
     // Left icon container (shows either live custom image thumbnail or an Upload vector icon)
@@ -1063,9 +1079,7 @@ fn draw_prominent_upload_button(
         let p = ui.painter();
         let c = thumb_box.center();
         let stroke = Stroke::new(1.9, Color32::WHITE);
-        // Upward arrow shaft
         p.line_segment([Pos2::new(c.x, c.y + 5.0), Pos2::new(c.x, c.y - 7.0)], stroke);
-        // Arrow head
         p.line_segment(
             [Pos2::new(c.x - 4.5, c.y - 2.5), Pos2::new(c.x, c.y - 7.0)],
             stroke,
@@ -1074,7 +1088,6 @@ fn draw_prominent_upload_button(
             [Pos2::new(c.x + 4.5, c.y - 2.5), Pos2::new(c.x, c.y - 7.0)],
             stroke,
         );
-        // Bottom tray bracket
         p.line_segment(
             [Pos2::new(c.x - 7.0, c.y + 4.0), Pos2::new(c.x - 7.0, c.y + 8.0)],
             stroke,

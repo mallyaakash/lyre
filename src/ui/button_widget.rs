@@ -29,21 +29,21 @@ impl ProportionalButtonMetrics {
     pub fn compute(cell_width: f32, cell_height: f32, show_label: bool) -> Self {
         let unit_l = cell_width.min(cell_height).max(20.0);
         let scale_s = unit_l / Self::REF_SIZE;
-        let corner_radius = (0.14 * unit_l).clamp(4.0, 24.0);
-        let base_stroke_width = (1.35 * scale_s).clamp(1.0, 4.0);
+        let corner_radius = (0.14 * unit_l).clamp(4.0, 22.0);
+        let base_stroke_width = (1.15 * scale_s).clamp(1.0, 3.0);
 
         let (icon_size, icon_center_offset_y) = if show_label {
-            (0.41 * unit_l, -0.06 * unit_l)
+            (0.39 * unit_l, -0.05 * unit_l)
         } else {
-            (0.52 * unit_l, 0.04 * unit_l)
+            (0.50 * unit_l, 0.04 * unit_l)
         };
 
         let badge_radius = (0.20 * icon_size).max(5.5);
-        let badge_offset = Vec2::new(0.38 * icon_size, -0.36 * icon_size);
+        let badge_offset = Vec2::new(0.42 * icon_size, -0.40 * icon_size);
         let badge_font_size = (1.26 * badge_radius).clamp(7.0, 34.0);
 
-        let label_font_size = (0.125 * unit_l).clamp(7.5, 26.0);
-        let label_offset_y = 0.30 * unit_l;
+        let label_font_size = (0.122 * unit_l).clamp(7.5, 25.0);
+        let label_offset_y = 0.31 * unit_l;
 
         Self {
             unit_l,
@@ -76,7 +76,8 @@ pub fn compute_ellipsis_menu_rect(cell_rect: Rect, scale_s: f32) -> Rect {
 }
 
 /// Renders a single proportionally scaled audio device button inside `cell_rect`
-/// with a frosted glass aesthetic and a studio-equipment rectangular LED indicator.
+/// using the **Linear / Raycast Matte Obsidian** aesthetic (uniform matte carbon card,
+/// crisp 1px hairline border, subtle icon well, and flush studio rectangular LED indicator).
 #[allow(clippy::too_many_arguments)]
 pub fn draw_audio_button(
     ui: &mut Ui,
@@ -124,30 +125,30 @@ pub fn draw_audio_button(
         cell_rect
     };
 
-    let painter = ui.painter_at(cell_rect.expand(8.0 * metrics.scale_s));
+    let painter = ui.painter_at(cell_rect.expand(7.0 * metrics.scale_s));
     let rounding = Rounding::same(metrics.corner_radius);
 
-    // 1. Soft drop shadow + outer ambient glow for depth
-    let shadow_offset = Vec2::new(0.0, (2.0 * metrics.scale_s).clamp(1.0, 4.0));
+    // 1. Subtle soft elevation shadow & optional active halo
+    let shadow_offset = Vec2::new(0.0, (1.5 * metrics.scale_s).clamp(1.0, 3.0));
     painter.rect_filled(
         draw_rect.translate(shadow_offset),
         rounding,
         match theme_mode {
-            ThemeMode::Dark => Color32::from_rgba_unmultiplied(0, 0, 0, 110),
-            ThemeMode::Light => Color32::from_rgba_unmultiplied(0, 0, 0, 32),
+            ThemeMode::Dark => Color32::from_rgba_unmultiplied(0, 0, 0, 90),
+            ThemeMode::Light => Color32::from_rgba_unmultiplied(15, 23, 42, 18),
         },
     );
 
     if let Some(glow) = palette.glow_color {
-        let glow_expand = (2.6 * metrics.scale_s).clamp(1.5, 6.0);
+        let glow_expand = (2.0 * metrics.scale_s).clamp(1.2, 4.5);
         painter.rect_filled(
             draw_rect.expand(glow_expand),
-            Rounding::same(metrics.corner_radius + glow_expand * 0.55),
+            Rounding::same(metrics.corner_radius + glow_expand * 0.5),
             glow,
         );
     }
 
-    // 2. Frosted Glass Card Base Fill
+    // 2. Uniform Matte Card Fill (Zero two-tone split bands)
     let body_fill = if is_device_present {
         palette.body_fill
     } else {
@@ -160,67 +161,9 @@ pub fn draw_audio_button(
     };
     painter.rect_filled(draw_rect, rounding, body_fill);
 
-    // 3. Multi-layered Glassy Reflection & Specular Rim
-    //    3a. Upper glass reflection band (top 46% of the button)
-    let upper_glass_rect = Rect::from_min_max(
-        draw_rect.min + Vec2::new(1.2, 1.2),
-        Pos2::new(
-            draw_rect.max.x - 1.2,
-            draw_rect.min.y + draw_rect.height() * 0.46,
-        ),
-    );
-    let upper_glass_fill = match theme_mode {
-        ThemeMode::Dark => {
-            if is_hovered || is_active {
-                Color32::from_rgba_unmultiplied(255, 255, 255, 19)
-            } else {
-                Color32::from_rgba_unmultiplied(255, 255, 255, 12)
-            }
-        }
-        ThemeMode::Light => Color32::from_rgba_unmultiplied(255, 255, 255, 95),
-    };
-    painter.rect_filled(
-        upper_glass_rect,
-        Rounding {
-            nw: (metrics.corner_radius - 1.2).max(2.0),
-            ne: (metrics.corner_radius - 1.2).max(2.0),
-            sw: (metrics.corner_radius * 0.35).max(2.0),
-            se: (metrics.corner_radius * 0.35).max(2.0),
-        },
-        upper_glass_fill,
-    );
-
-    //    3b. Inner glass bevel ring (1px bright inner border for frosted acrylic look)
-    let inner_glass_stroke = match theme_mode {
-        ThemeMode::Dark => Color32::from_rgba_unmultiplied(255, 255, 255, if is_hovered { 34 } else { 20 }),
-        ThemeMode::Light => Color32::from_rgba_unmultiplied(255, 255, 255, 150),
-    };
-    painter.rect_stroke(
-        draw_rect.shrink(1.2),
-        Rounding::same((metrics.corner_radius - 1.2).max(2.0)),
-        Stroke::new(1.0, inner_glass_stroke),
-    );
-
-    //    3c. Crisp top specular highlight line along the top glass edge
-    let specular_inset = (metrics.corner_radius * 0.75).max(4.0);
-    if draw_rect.width() > specular_inset * 2.2 {
-        let spec_y = draw_rect.top() + 1.5;
-        let spec_color = match theme_mode {
-            ThemeMode::Dark => Color32::from_rgba_unmultiplied(255, 255, 255, 58),
-            ThemeMode::Light => Color32::from_rgba_unmultiplied(255, 255, 255, 210),
-        };
-        painter.line_segment(
-            [
-                Pos2::new(draw_rect.left() + specular_inset, spec_y),
-                Pos2::new(draw_rect.right() - specular_inset, spec_y),
-            ],
-            Stroke::new(1.2, spec_color),
-        );
-    }
-
-    // 4. Outer Glass Border Stroke
+    // 3. Crisp 1px Hairline Border + Single Top-Edge Rim Highlight
     let stroke_width = if is_being_dragged {
-        (metrics.base_stroke_width * 2.2).max(2.0)
+        (metrics.base_stroke_width * 2.0).max(1.8)
     } else {
         metrics.base_stroke_width * palette.border_width_mult
     };
@@ -230,10 +173,22 @@ pub fn draw_audio_button(
         Stroke::new(stroke_width, palette.border_color),
     );
 
-    // 5. Studio Equipment Rectangular LED Indicator Light (Top-Center)
-    //    - Muted  -> Glowing Red rectangular studio light
-    //    - Active -> Glowing Green rectangular studio light
-    //    - Unused -> Empty recessed Grey rectangular studio light
+    let rim_inset = (metrics.corner_radius * 0.85).max(5.0);
+    if draw_rect.width() > rim_inset * 2.2 {
+        let rim_y = draw_rect.top() + 1.0;
+        painter.line_segment(
+            [
+                Pos2::new(draw_rect.left() + rim_inset, rim_y),
+                Pos2::new(draw_rect.right() - rim_inset, rim_y),
+            ],
+            Stroke::new(1.0, palette.top_rim_highlight),
+        );
+    }
+
+    // 4. Studio Equipment Rectangular LED Indicator (Top-Center)
+    //    - Muted  -> Lit Red studio rectangular light
+    //    - Active -> Lit Green studio rectangular light
+    //    - Unused -> Recessed Matte Grey rectangular slot
     draw_studio_led_indicator(
         &painter,
         draw_rect,
@@ -243,14 +198,31 @@ pub fn draw_audio_button(
         theme_mode,
     );
 
-    // 6. Centered Device Icon (Built-in SVG or Custom Uploaded Media with full RGBA transparency)
+    // 5. Centered Device Icon + Subtle Raycast/Linear Squircle Icon Well
     let icon_center = Pos2::new(
         draw_rect.center().x,
         draw_rect.center().y + metrics.icon_center_offset_y,
     );
-    let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(metrics.icon_size));
 
-    if let Some(tex) = icon_cache.get_texture(ui.ctx(), &btn.icon, metrics.icon_size * 1.5) {
+    if matches!(btn.icon, IconSource::Preset(_)) {
+        let well_size = (metrics.icon_size * 1.34).min(draw_rect.height() * 0.56);
+        let well_rect = Rect::from_center_size(icon_center, Vec2::splat(well_size));
+        let well_rounding = Rounding::same((well_size * 0.26).clamp(4.0, 14.0));
+        painter.rect_filled(well_rect, well_rounding, palette.icon_well_fill);
+        painter.rect_stroke(
+            well_rect,
+            well_rounding,
+            Stroke::new(1.0, palette.icon_well_stroke),
+        );
+    }
+
+    let icon_draw_size = match btn.icon {
+        IconSource::Preset(_) => metrics.icon_size * 0.84,
+        IconSource::CustomPath(_) => metrics.icon_size * 1.12,
+    };
+    let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_draw_size));
+
+    if let Some(tex) = icon_cache.get_texture(ui.ctx(), &btn.icon, icon_draw_size * 1.5) {
         let tint = match btn.icon {
             IconSource::Preset(_) => palette.icon_tint,
             // Preserve true colors and alpha transparency for uploaded PNG/WebP/SVG/ICO/JPG
@@ -270,7 +242,7 @@ pub fn draw_audio_button(
         );
     }
 
-    // 7. Optional Circular Corner Number Badge (1, 2, 3...) overlapping top-right of the icon
+    // 6. Optional Circular Corner Number Badge (1, 2, 3...) overlapping top-right of the icon well
     if btn.badge_enabled {
         let badge_center = icon_center + metrics.badge_offset;
         painter.circle_filled(
@@ -288,15 +260,15 @@ pub fn draw_audio_button(
         );
     }
 
-    // 8. Subtle Input ("MIC") / Output ("OUT") micro-tag in top-left corner
+    // 7. Subtle Input ("MIC") / Output ("OUT") micro-tag in top-left corner
     if btn.direction == EndpointDirection::Input || edit_mode {
-        let tag_font = (0.085 * metrics.unit_l).clamp(6.5, 11.0);
+        let tag_font = (0.084 * metrics.unit_l).clamp(6.5, 10.5);
         let tag_text = match btn.direction {
             EndpointDirection::Output => "OUT",
             EndpointDirection::Input => "MIC",
         };
         let tag_pos = Pos2::new(
-            draw_rect.left() + (7.5 * metrics.scale_s).max(5.5),
+            draw_rect.left() + (8.0 * metrics.scale_s).max(5.5),
             draw_rect.top() + (6.5 * metrics.scale_s).max(5.0),
         );
         painter.text(
@@ -308,7 +280,7 @@ pub fn draw_audio_button(
         );
     }
 
-    // 9. Optional Text Label ("Icon + Text Title" vs "Icon-Only")
+    // 8. Optional Text Label ("Icon + Text Title" vs "Icon-Only")
     if btn.show_label && !btn.title.is_empty() {
         let label_pos = Pos2::new(
             draw_rect.center().x,
@@ -333,25 +305,25 @@ pub fn draw_audio_button(
         );
     }
 
-    // 10. Three Vertical Ellipses (`⋮`) Edit Button in the Top-Right Corner
-    //     Always visible in Edit Mode, and visible on hover in Minimalist Mode.
+    // 9. Three Vertical Ellipses (`⋮`) Edit Button in the Top-Right Corner
+    //    Always visible in Edit Mode, and visible on hover in Minimalist Mode.
     if edit_mode || is_hovered {
         if menu_hovered {
             let hover_pill = match theme_mode {
-                ThemeMode::Dark => Color32::from_rgba_unmultiplied(255, 255, 255, 42),
-                ThemeMode::Light => Color32::from_rgba_unmultiplied(0, 0, 0, 28),
+                ThemeMode::Dark => Color32::from_rgba_unmultiplied(255, 255, 255, 32),
+                ThemeMode::Light => Color32::from_rgba_unmultiplied(0, 0, 0, 22),
             };
             painter.rect_filled(menu_rect, Rounding::same(menu_rect.width() * 0.35), hover_pill);
         }
 
-        let dot_r = (1.5 * metrics.scale_s).clamp(1.2, 2.5);
-        let dot_spacing = (4.4 * metrics.scale_s).clamp(3.3, 7.0);
+        let dot_r = (1.45 * metrics.scale_s).clamp(1.2, 2.4);
+        let dot_spacing = (4.3 * metrics.scale_s).clamp(3.3, 6.8);
         let dot_alpha = if menu_hovered {
             255
         } else if is_hovered {
-            210
+            205
         } else {
-            145
+            135
         };
         let dot_color = Color32::from_rgba_unmultiplied(
             palette.text_color.r(),
@@ -368,10 +340,10 @@ pub fn draw_audio_button(
     }
 }
 
-/// Draws a hardware studio-equipment rectangular LED light indicator near the top-center of a button:
-/// - **Muted (`is_muted`):** Lit Red rectangular studio LED with outer crimson bloom.
-/// - **Active (`is_active && !is_muted`):** Lit Green rectangular studio LED with outer emerald bloom.
-/// - **Unused (`!is_active && !is_muted`):** Empty recessed Grey rectangular LED housing.
+/// Draws a flush, modern studio-equipment rectangular LED indicator near the top-center of a button:
+/// - **Muted (`is_muted`):** Uniform Crimson Red rectangular studio LED (`#EF4444`) with soft ambient halo.
+/// - **Active (`is_active && !is_muted`):** Uniform Emerald Green rectangular studio LED (`#22C55E`) with soft ambient halo.
+/// - **Unused (`!is_active && !is_muted`):** Recessed Matte Grey rectangular slot (`#23262F`).
 fn draw_studio_led_indicator(
     painter: &egui::Painter,
     draw_rect: Rect,
@@ -380,79 +352,51 @@ fn draw_studio_led_indicator(
     is_muted: bool,
     theme_mode: ThemeMode,
 ) {
-    let led_w = (draw_rect.width() * 0.28).clamp(16.0, 44.0);
-    let led_h = (5.8 * scale_s).clamp(4.2, 8.5);
-    let top_offset = (8.5 * scale_s).clamp(5.5, 13.0);
+    let led_w = (draw_rect.width() * 0.25).clamp(15.0, 38.0);
+    let led_h = (5.0 * scale_s).clamp(3.8, 7.2);
+    let top_offset = (8.2 * scale_s).clamp(5.5, 12.5);
     let led_rect = Rect::from_center_size(
         Pos2::new(draw_rect.center().x, draw_rect.top() + top_offset),
         Vec2::new(led_w, led_h),
     );
-    let led_rounding = Rounding::same((1.6 * scale_s).clamp(1.2, 2.8));
+    let led_rounding = Rounding::same((1.5 * scale_s).clamp(1.2, 2.4));
 
     if is_muted {
         // RED STUDIO LED (Muted)
         painter.rect_filled(
-            led_rect.expand((3.2 * scale_s).clamp(2.0, 5.5)),
-            Rounding::same(3.5 * scale_s),
-            Color32::from_rgba_unmultiplied(239, 68, 68, 52),
+            led_rect.expand((2.4 * scale_s).clamp(1.5, 4.5)),
+            Rounding::same(3.0 * scale_s),
+            Color32::from_rgba_unmultiplied(239, 68, 68, 48),
         );
-        painter.rect_filled(
-            led_rect.expand((1.4 * scale_s).clamp(1.0, 2.5)),
-            Rounding::same(2.4 * scale_s),
-            Color32::from_rgba_unmultiplied(239, 68, 68, 105),
-        );
-        // LED body
         painter.rect_filled(led_rect, led_rounding, Color32::from_rgb(239, 68, 68));
-        // Inner bright filament hotspot
-        let core_rect = led_rect.shrink2(Vec2::new(led_w * 0.14, led_h * 0.26));
-        painter.rect_filled(
-            core_rect,
-            Rounding::same(1.0),
-            Color32::from_rgb(254, 202, 202),
-        );
-        // Crisp studio bezel frame
         painter.rect_stroke(
             led_rect,
             led_rounding,
-            Stroke::new(1.0, Color32::from_rgb(153, 27, 27)),
+            Stroke::new(1.0, Color32::from_rgb(248, 113, 113)),
         );
     } else if is_active {
         // GREEN STUDIO LED (In Use / Active)
         painter.rect_filled(
-            led_rect.expand((3.4 * scale_s).clamp(2.0, 6.0)),
-            Rounding::same(3.5 * scale_s),
-            Color32::from_rgba_unmultiplied(34, 197, 94, 55),
+            led_rect.expand((2.4 * scale_s).clamp(1.5, 4.5)),
+            Rounding::same(3.0 * scale_s),
+            Color32::from_rgba_unmultiplied(34, 197, 94, 48),
         );
-        painter.rect_filled(
-            led_rect.expand((1.5 * scale_s).clamp(1.0, 2.5)),
-            Rounding::same(2.4 * scale_s),
-            Color32::from_rgba_unmultiplied(34, 197, 94, 115),
-        );
-        // LED body
         painter.rect_filled(led_rect, led_rounding, Color32::from_rgb(34, 197, 94));
-        // Inner bright filament hotspot
-        let core_rect = led_rect.shrink2(Vec2::new(led_w * 0.14, led_h * 0.26));
-        painter.rect_filled(
-            core_rect,
-            Rounding::same(1.0),
-            Color32::from_rgb(187, 247, 208),
-        );
-        // Crisp studio bezel frame
         painter.rect_stroke(
             led_rect,
             led_rounding,
-            Stroke::new(1.0, Color32::from_rgb(21, 128, 61)),
+            Stroke::new(1.0, Color32::from_rgb(74, 222, 128)),
         );
     } else {
-        // EMPTY GREY STUDIO LED (Unused / Unlit Recessed Lens)
+        // EMPTY MATTE GREY STUDIO LED SLOT (Unused)
         let (unlit_fill, bezel_stroke) = match theme_mode {
             ThemeMode::Dark => (
-                Color32::from_rgb(34, 35, 40),
-                Color32::from_rgb(66, 68, 78),
+                Color32::from_rgb(30, 33, 41),
+                Color32::from_rgb(48, 52, 64),
             ),
             ThemeMode::Light => (
-                Color32::from_rgb(206, 209, 218),
-                Color32::from_rgb(156, 163, 175),
+                Color32::from_rgb(214, 218, 228),
+                Color32::from_rgb(182, 188, 202),
             ),
         };
         painter.rect_filled(led_rect, led_rounding, unlit_fill);
