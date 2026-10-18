@@ -155,7 +155,12 @@
 - [x] **9.3** Refine Top Config Bar & Customize Button Dialog (`src/ui/settings_panel.rs`) to match the Linear / Raycast Matte Obsidian design language (uniform matte section cards, clean hairline borders, custom-painted toggle switches instead of default checkboxes, and zero two-tone bands).
 - [x] **9.4** **Verification Gate 9:** Run `cargo test`, build release binary (`cargo build --release`), commit to Git, and launch.
 
+### Checkpoint 10: Transparent `logo_bg.png` Taskbar/Tray Icon & Linear / Raycast Matte Obsidian Right-Click Context Window
+- [x] **10.1** Embed `G:\Projects\Lyre\logo_bg.png` (transparent background, auto-cropped to centered square canvas) as the System Tray and Taskbar/Window icon (`src/tray/mod.rs`).
+- [x] **10.2** Replace the classic OS right-click menu with a custom frameless **Linear / Raycast Matte Obsidian** right-click context window (`render_context_menu_viewport` in `src/ui/settings_panel.rs`, `compute_same_monitor_cursor_menu_pos` in `src/tray/win32_window.rs`, and `src/app.rs`), plus enable Win32 dark mode (`uxtheme.dll`) for the System Tray menu.
+- [x] **10.3** **Verification Gate 10:** Run `cargo test`, build release binary (`cargo build --release`), commit to Git, and launch.
+
 ---
 
 ## Checkpoint Progress Log
-- **Current Phase:** All Checkpoints (0 through 9) Completed and Verified.
+- **Current Phase:** All Checkpoints (0 through 10) Completed and Verified.

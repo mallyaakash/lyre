@@ -12,7 +12,8 @@ use crate::tray::{TrayCommand, TrayManager};
 use crate::ui::grid::{render_button_grid, GridEvent};
 use crate::ui::icons::IconCache;
 use crate::ui::settings_panel::{
-    render_button_editor_modal, render_top_config_bar, EditorState,
+    render_button_editor_modal, render_context_menu_viewport, render_top_config_bar,
+    ContextMenuAction, EditorState,
 };
 use crate::ui::theme::apply_theme;
 
@@ -463,12 +464,15 @@ impl eframe::App for LyreApp {
                 if !in_resize_zone {
                     match bg_event {
                         GridEvent::SwitchDevice(btn_idx) => {
+                            self.editor.context_menu = None;
                             self.switch_button_by_index(btn_idx);
                         }
                         GridEvent::EditButton(idx) => {
+                            self.editor.context_menu = None;
                             self.editor.selected_button_idx = Some(idx);
                         }
                         GridEvent::MoveButton { from, to } => {
+                            self.editor.context_menu = None;
                             if from < self.config.buttons.len() && to < self.config.buttons.len() {
                                 let item = self.config.buttons.remove(from);
                                 self.config.buttons.insert(to, item);
@@ -479,29 +483,18 @@ impl eframe::App for LyreApp {
                             }
                         }
                         GridEvent::OpenContextMenu { button_idx } => {
-                            if let (Some(hwnd), Some(ref mut tray)) = (self.hwnd, &mut self.tray) {
-                                let target_tuple = button_idx.and_then(|idx| {
-                                    self.config
-                                        .buttons
-                                        .get(idx)
-                                        .map(|b| (idx, b.title.as_str()))
-                                });
-                                tray.show_window_context_menu(
-                                    hwnd,
-                                    target_tuple,
-                                    self.audio.are_outputs_muted(),
-                                    self.audio.are_inputs_muted(),
-                                    self.config.window.minimalist_mode,
-                                    self.config.window.theme_mode == ThemeMode::Dark,
-                                    self.config.buttons.iter().any(|b| b.show_label),
-                                    self.config.window.always_on_top,
-                                );
-                            }
+                            self.editor.open_context_menu(
+                                self.hwnd,
+                                button_idx,
+                                ctx.pixels_per_point(),
+                            );
                         }
                         GridEvent::StartWindowDrag => {
+                            self.editor.context_menu = None;
                             ctx.send_viewport_cmd(ViewportCommand::StartDrag);
                         }
                         GridEvent::AddFirstButton => {
+                            self.editor.context_menu = None;
                             let new_btn = crate::ui::grid::create_new_button_from_audio(
                                 &self.audio,
                                 self.config.buttons.len(),
@@ -517,6 +510,7 @@ impl eframe::App for LyreApp {
                                         || i.pointer.secondary_down())
                             });
                             if pointer_drag && self.editor.selected_button_idx.is_none() {
+                                self.editor.context_menu = None;
                                 ctx.send_viewport_cmd(ViewportCommand::StartDrag);
                             }
                         }
@@ -524,7 +518,93 @@ impl eframe::App for LyreApp {
                 }
             });
 
-        // 8. Per-button Customization Modal (opens on the same monitor as main_hwnd)
+        // 8. Custom Linear / Raycast Matte Obsidian Right-Click Context Window
+        match render_context_menu_viewport(ctx, &self.config, &self.audio, &mut self.editor) {
+            ContextMenuAction::None => {}
+            ContextMenuAction::SwitchButton(idx) => {
+                self.switch_button_by_index(idx);
+            }
+            ContextMenuAction::EditButton(idx) => {
+                if idx < self.config.buttons.len() {
+                    self.editor.selected_button_idx = Some(idx);
+                }
+            }
+            ContextMenuAction::DuplicateButton(idx) => {
+                if let Some(mut cloned) = self.config.buttons.get(idx).cloned() {
+                    cloned.id = uuid::Uuid::new_v4().to_string();
+                    cloned.badge_enabled = true;
+                    cloned.badge_number = cloned.badge_number.saturating_add(1);
+                    let insert_at = (idx + 1).min(self.config.buttons.len());
+                    self.config.buttons.insert(insert_at, cloned);
+                    self.mark_config_dirty();
+                }
+            }
+            ContextMenuAction::DeleteButton(idx) => {
+                if idx < self.config.buttons.len() {
+                    self.config.buttons.remove(idx);
+                    if self.editor.selected_button_idx == Some(idx) {
+                        self.editor.selected_button_idx = None;
+                    }
+                    self.mark_config_dirty();
+                }
+            }
+            ContextMenuAction::AddButton => {
+                let new_btn = crate::ui::grid::create_new_button_from_audio(
+                    &self.audio,
+                    self.config.buttons.len(),
+                );
+                self.config.buttons.push(new_btn);
+                self.editor.selected_button_idx = Some(self.config.buttons.len() - 1);
+                self.mark_config_dirty();
+            }
+            ContextMenuAction::ToggleMuteOutputs => {
+                if let Err(err) = self.audio.toggle_mute_outputs() {
+                    self.editor.status_message = Some(err);
+                }
+            }
+            ContextMenuAction::ToggleMuteInputs => {
+                if let Err(err) = self.audio.toggle_mute_inputs() {
+                    self.editor.status_message = Some(err);
+                }
+            }
+            ContextMenuAction::ToggleMinimalist => {
+                self.config.window.minimalist_mode = !self.config.window.minimalist_mode;
+                self.sync_window_mode(ctx);
+                self.mark_config_dirty();
+            }
+            ContextMenuAction::ToggleTheme => {
+                self.config.window.theme_mode = match self.config.window.theme_mode {
+                    ThemeMode::Dark => ThemeMode::Light,
+                    ThemeMode::Light => ThemeMode::Dark,
+                };
+                self.sync_window_mode(ctx);
+                self.mark_config_dirty();
+            }
+            ContextMenuAction::ToggleLabels => {
+                let any_shown = self.config.buttons.iter().any(|b| b.show_label);
+                let next = !any_shown;
+                for btn in &mut self.config.buttons {
+                    btn.show_label = next;
+                }
+                self.mark_config_dirty();
+            }
+            ContextMenuAction::ToggleAlwaysOnTop => {
+                self.config.window.always_on_top = !self.config.window.always_on_top;
+                self.sync_window_mode(ctx);
+                self.mark_config_dirty();
+            }
+            ContextMenuAction::HideToTray => {
+                self.set_visibility(ctx, false);
+            }
+            ContextMenuAction::QuitApp => {
+                self.config.window.visible = true;
+                let _ = config::save_config(&self.config);
+                self.quit_requested = true;
+                ctx.send_viewport_cmd(ViewportCommand::Close);
+            }
+        }
+
+        // 9. Per-button Customization Modal (opens on the same monitor as main_hwnd)
         if render_button_editor_modal(
             ctx,
             self.hwnd,
@@ -536,7 +616,7 @@ impl eframe::App for LyreApp {
             self.mark_config_dirty();
         }
 
-        // 9. Debounced auto-save to %APPDATA%/Lyre/config.json
+        // 10. Debounced auto-save to %APPDATA%/Lyre/config.json
         if self.dirty_config
             && self.last_config_change.elapsed() >= Duration::from_millis(250)
         {

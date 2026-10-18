@@ -1,6 +1,6 @@
 use std::ffi::c_void;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, WPARAM};
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
     DWMWCP_ROUND,
@@ -9,11 +9,17 @@ use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, InvalidateRect, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindowVisible, PostMessageW,
+    GetCursorPos, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindowVisible, PostMessageW,
     SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, HWND_NOTOPMOST,
     HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_RESTORE,
     SW_SHOW, WM_CLOSE, WM_NULL, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
 };
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn LoadLibraryA(lp_lib_file_name: *const u8) -> *mut c_void;
+    fn GetProcAddress(h_module: *mut c_void, lp_proc_name: *const u8) -> *const c_void;
+}
 
 /// Extracts the raw Win32 `HWND` (as `isize`) from any `HasWindowHandle` provider.
 pub fn extract_hwnd(window_handle_provider: &dyn HasWindowHandle) -> Option<isize> {
@@ -21,6 +27,29 @@ pub fn extract_hwnd(window_handle_provider: &dyn HasWindowHandle) -> Option<isiz
     match handle.as_raw() {
         RawWindowHandle::Win32(win32) => Some(win32.hwnd.get()),
         _ => None,
+    }
+}
+
+/// Enables Windows 10/11 dark mode for native Win32 popup menus (such as the System Tray menu)
+/// via `uxtheme.dll` undocumented ordinals 135 (`SetPreferredAppMode`) & 136 (`FlushMenuThemes`).
+pub fn enable_win32_dark_menus(dark: bool) {
+    unsafe {
+        let hmod = LoadLibraryA(b"uxtheme.dll\0".as_ptr());
+        if !hmod.is_null() {
+            // Ordinal 135: SetPreferredAppMode(int mode) -> 2 = ForceDark, 1 = AllowDark, 3 = ForceLight
+            let proc_135 = GetProcAddress(hmod, 135usize as *const u8);
+            if !proc_135.is_null() {
+                let set_preferred_app_mode: unsafe extern "system" fn(i32) -> i32 =
+                    std::mem::transmute(proc_135);
+                let _ = set_preferred_app_mode(if dark { 2 } else { 3 });
+            }
+            // Ordinal 136: FlushMenuThemes()
+            let proc_136 = GetProcAddress(hmod, 136usize as *const u8);
+            if !proc_136.is_null() {
+                let flush_menu_themes: unsafe extern "system" fn() = std::mem::transmute(proc_136);
+                flush_menu_themes();
+            }
+        }
     }
 }
 
@@ -60,6 +89,7 @@ pub fn apply_tool_window_style(hwnd_val: isize) {
 
 /// Sets the native Windows 10/11 window title bar & border to Dark Mode or Light Mode.
 pub fn apply_dark_title_bar_win32(hwnd_val: isize, dark: bool) {
+    enable_win32_dark_menus(dark);
     if hwnd_val == 0 {
         return;
     }
@@ -192,5 +222,48 @@ pub fn compute_same_monitor_dialog_pos(
         let target_y = (win_cy - dlg_px_h / 2).clamp(min_y, max_y);
 
         Some([target_x as f32 / ppp, target_y as f32 / ppp])
+    }
+}
+
+/// Computes the ideal logical screen coordinates `[x, y]` for opening the custom
+/// **Linear / Raycast Matte Obsidian** right-click context window right at the cursor,
+/// clamped within the current monitor's work area (`rcWork`).
+pub fn compute_same_monitor_cursor_menu_pos(
+    hwnd_val: isize,
+    menu_w: f32,
+    menu_h: f32,
+    pixels_per_point: f32,
+) -> Option<[f32; 2]> {
+    let ppp = pixels_per_point.max(1.0);
+    unsafe {
+        let mut pt = POINT::default();
+        if GetCursorPos(&mut pt).is_err() {
+            return None;
+        }
+
+        if hwnd_val != 0 {
+            let hwnd = HWND(hwnd_val as *mut c_void);
+            let hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            let mut mi = MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            if GetMonitorInfoW(hmon, &mut mi).as_bool() {
+                let work = mi.rcWork;
+                let px_w = (menu_w * ppp).round() as i32;
+                let px_h = (menu_h * ppp).round() as i32;
+                let margin = 10;
+                let min_x = work.left + margin;
+                let max_x = (work.right - px_w - margin).max(min_x);
+                let min_y = work.top + margin;
+                let max_y = (work.bottom - px_h - margin).max(min_y);
+
+                let target_x = pt.x.clamp(min_x, max_x);
+                let target_y = pt.y.clamp(min_y, max_y);
+                return Some([target_x as f32 / ppp, target_y as f32 / ppp]);
+            }
+        }
+
+        Some([pt.x as f32 / ppp, pt.y as f32 / ppp])
     }
 }

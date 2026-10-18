@@ -447,26 +447,66 @@ impl TrayManager {
     }
 }
 
-/// Loads `logo.png` (embedded at compile time) as a 64x64 RGBA `tray_icon::Icon`.
+/// Crops any outer transparent margin around an RGBA image and centers it inside a square
+/// transparent canvas with a subtle 2px breathing margin so the icon fills the taskbar/tray slot.
+fn crop_transparent_logo_to_square(img: &image::DynamicImage) -> image::RgbaImage {
+    let src = img.to_rgba8();
+    let (w, h) = src.dimensions();
+    let mut min_x = w;
+    let mut min_y = h;
+    let mut max_x = 0u32;
+    let mut max_y = 0u32;
+
+    for y in 0..h {
+        for x in 0..w {
+            if src.get_pixel(x, y)[3] > 10 {
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+            }
+        }
+    }
+
+    if min_x > max_x || min_y > max_y {
+        return src;
+    }
+
+    let crop_w = max_x - min_x + 1;
+    let crop_h = max_y - min_y + 1;
+    let cropped = image::imageops::crop_imm(&src, min_x, min_y, crop_w, crop_h).to_image();
+
+    let side = crop_w.max(crop_h);
+    let pad = (side as f32 * 0.03).round() as u32;
+    let canvas_side = side + pad * 2;
+    let mut square = image::RgbaImage::from_pixel(canvas_side, canvas_side, image::Rgba([0, 0, 0, 0]));
+    let offset_x = ((canvas_side - crop_w) / 2) as i64;
+    let offset_y = ((canvas_side - crop_h) / 2) as i64;
+    image::imageops::overlay(&mut square, &cropped, offset_x, offset_y);
+    square
+}
+
+/// Loads `logo_bg.png` (transparent background, embedded at compile time) as a 64x64 RGBA `tray_icon::Icon`.
 pub fn load_embedded_tray_icon() -> Result<Icon, String> {
-    let bytes = include_bytes!("../../logo.png");
+    let bytes = include_bytes!("../../logo_bg.png");
     let img = image::load_from_memory(bytes)
-        .map_err(|e| format!("Failed to decode embedded logo.png: {}", e))?;
-    let resized = img.resize_exact(64, 64, image::imageops::FilterType::Lanczos3);
-    let rgba = resized.to_rgba8();
-    let (w, h) = rgba.dimensions();
-    Icon::from_rgba(rgba.into_raw(), w, h)
+        .map_err(|e| format!("Failed to decode embedded logo_bg.png: {}", e))?;
+    let square = crop_transparent_logo_to_square(&img);
+    let resized = image::imageops::resize(&square, 64, 64, image::imageops::FilterType::Lanczos3);
+    let (w, h) = resized.dimensions();
+    Icon::from_rgba(resized.into_raw(), w, h)
         .map_err(|e| format!("Failed to construct tray Icon: {}", e))
 }
 
+/// Loads `logo_bg.png` (transparent background, embedded at compile time) as a 64x64 RGBA `egui::IconData`.
 pub fn load_embedded_egui_icon() -> Option<egui::IconData> {
-    let bytes = include_bytes!("../../logo.png");
+    let bytes = include_bytes!("../../logo_bg.png");
     let img = image::load_from_memory(bytes).ok()?;
-    let resized = img.resize_exact(64, 64, image::imageops::FilterType::Lanczos3);
-    let rgba = resized.to_rgba8();
-    let (width, height) = rgba.dimensions();
+    let square = crop_transparent_logo_to_square(&img);
+    let resized = image::imageops::resize(&square, 64, 64, image::imageops::FilterType::Lanczos3);
+    let (width, height) = resized.dimensions();
     Some(egui::IconData {
-        rgba: rgba.into_raw(),
+        rgba: resized.into_raw(),
         width,
         height,
     })

@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use egui::{
     Align2, CentralPanel, Color32, Context, CursorIcon, FontFamily, FontId, Frame as EguiFrame,
     Margin, Pos2, Rect, RichText, Rounding, ScrollArea, Sense, Stroke, Ui, Vec2, ViewportBuilder,
@@ -9,10 +11,46 @@ use crate::config::{
     format_hex_color, parse_hex_color, shorten_device_title, AppConfig, IconSource, PresetIcon,
     ThemeMode, DEFAULT_COLOR_PALETTE,
 };
-use crate::tray::win32_window::compute_same_monitor_dialog_pos;
+use crate::tray::win32_window::{
+    compute_same_monitor_cursor_menu_pos, compute_same_monitor_dialog_pos,
+};
 use crate::ui::grid::create_new_button_from_audio;
 use crate::ui::icons::IconCache;
 use crate::ui::theme::apply_theme;
+
+/// Tracks the state of the custom **Linear / Raycast Matte Obsidian** right-click context window.
+#[derive(Debug, Clone)]
+pub struct ContextMenuState {
+    /// If the user right-clicked on a specific button card, holds its index.
+    pub target_button_idx: Option<usize>,
+    /// Logical screen coordinates `[x, y]` where the context window spawns.
+    pub spawn_pos: [f32; 2],
+    /// Timestamp when the context window was opened (used for focus-loss dismissal).
+    pub opened_at: Instant,
+    /// Whether the context window has observed OS focus yet.
+    pub had_focus: bool,
+    /// Whether the context window needs initial positioning on this open cycle.
+    pub just_opened: bool,
+}
+
+/// Action triggered by interacting with the custom right-click context window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextMenuAction {
+    None,
+    SwitchButton(usize),
+    EditButton(usize),
+    DuplicateButton(usize),
+    DeleteButton(usize),
+    AddButton,
+    ToggleMuteOutputs,
+    ToggleMuteInputs,
+    ToggleMinimalist,
+    ToggleTheme,
+    ToggleLabels,
+    ToggleAlwaysOnTop,
+    HideToTray,
+    QuitApp,
+}
 
 #[derive(Debug, Default)]
 pub struct EditorState {
@@ -24,6 +62,41 @@ pub struct EditorState {
     pub dialog_spawn_pos: Option<[f32; 2]>,
     /// Tracks whether the external viewport was already open on the previous frame.
     pub was_open: bool,
+    /// Active custom Linear / Raycast Matte Obsidian right-click context window state.
+    pub context_menu: Option<ContextMenuState>,
+}
+
+impl EditorState {
+    /// Opens the custom **Linear / Raycast Matte Obsidian** right-click context window
+    /// right at the cursor on the same monitor as `main_hwnd`.
+    pub fn open_context_menu(
+        &mut self,
+        main_hwnd: Option<isize>,
+        target_button_idx: Option<usize>,
+        pixels_per_point: f32,
+    ) {
+        let menu_w = 292.0;
+        let menu_h = if target_button_idx.is_some() {
+            504.0
+        } else {
+            356.0
+        };
+        let spawn_pos = compute_same_monitor_cursor_menu_pos(
+            main_hwnd.unwrap_or(0),
+            menu_w,
+            menu_h,
+            pixels_per_point,
+        )
+        .unwrap_or([240.0, 240.0]);
+
+        self.context_menu = Some(ContextMenuState {
+            target_button_idx,
+            spawn_pos,
+            opened_at: Instant::now(),
+            had_focus: false,
+            just_opened: true,
+        });
+    }
 }
 
 /// Custom-painted uniform matte pill button (**Linear / Raycast Matte Obsidian** style,
@@ -1146,6 +1219,722 @@ fn draw_prominent_upload_button(
         if is_custom { "Change" } else { "Browse…" },
         FontId::new(11.5, FontFamily::Proportional),
         Color32::WHITE,
+    );
+
+    resp
+}
+
+/// Renders the custom **Linear / Raycast Matte Obsidian** right-click context window
+/// inside an independent frameless native OS viewport (`ctx.show_viewport_immediate`).
+/// Because it is a standalone OS popup window, it extends freely outside even a tiny main window.
+pub fn render_context_menu_viewport(
+    ctx: &Context,
+    config: &AppConfig,
+    audio: &AudioEngine,
+    editor: &mut EditorState,
+) -> ContextMenuAction {
+    let Some(mut menu_state) = editor.context_menu.clone() else {
+        return ContextMenuAction::None;
+    };
+
+    // Validate button index if one was targeted
+    if let Some(idx) = menu_state.target_button_idx {
+        if idx >= config.buttons.len() {
+            menu_state.target_button_idx = None;
+        }
+    }
+
+    let has_target_btn = menu_state.target_button_idx.is_some();
+    let menu_w = 292.0;
+    let menu_h = if has_target_btn { 504.0 } else { 356.0 };
+    let theme = config.window.theme_mode;
+
+    let viewport_id = ViewportId::from_hash_of("lyre_context_menu_viewport");
+    let viewport_builder = ViewportBuilder::default()
+        .with_title("Lyre — Quick Context Menu")
+        .with_decorations(false)
+        .with_taskbar(false)
+        .with_always_on_top()
+        .with_resizable(false)
+        .with_inner_size([menu_w, menu_h])
+        .with_position(Pos2::new(menu_state.spawn_pos[0], menu_state.spawn_pos[1]));
+
+    let mut chosen_action = ContextMenuAction::None;
+    let mut should_close = false;
+    let just_opened = menu_state.just_opened;
+    let spawn_pos = menu_state.spawn_pos;
+
+    let outputs_muted = audio.are_outputs_muted();
+    let inputs_muted = audio.are_inputs_muted();
+    let minimalist_mode = config.window.minimalist_mode;
+    let dark_mode = theme == ThemeMode::Dark;
+    let labels_shown = config.buttons.iter().any(|b| b.show_label);
+    let always_on_top = config.window.always_on_top;
+
+    let target_btn_info = menu_state.target_button_idx.and_then(|idx| {
+        config.buttons.get(idx).map(|b| {
+            let [r, g, b_ch] = parse_hex_color(&b.color_hex).unwrap_or([59, 130, 246]);
+            let accent = Color32::from_rgb(r, g, b_ch);
+            let is_active = audio.is_device_active(&b.device_id, b.direction);
+            (idx, b.title.clone(), b.direction, accent, is_active)
+        })
+    });
+
+    ctx.show_viewport_immediate(viewport_id, viewport_builder, |vp_ctx, _class| {
+        apply_theme(vp_ctx, theme);
+
+        if just_opened {
+            vp_ctx.send_viewport_cmd(ViewportCommand::OuterPosition(Pos2::new(
+                spawn_pos[0],
+                spawn_pos[1],
+            )));
+            vp_ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(menu_w, menu_h)));
+            vp_ctx.send_viewport_cmd(ViewportCommand::Focus);
+        }
+
+        let focused = vp_ctx.input(|i| i.viewport().focused);
+        if focused == Some(true) {
+            menu_state.had_focus = true;
+        }
+        if vp_ctx.input(|i| i.viewport().close_requested() || i.key_pressed(egui::Key::Escape)) {
+            should_close = true;
+        } else if (menu_state.had_focus
+            || menu_state.opened_at.elapsed() > Duration::from_millis(320))
+            && focused == Some(false)
+        {
+            should_close = true;
+        }
+
+        let (canvas_bg, outer_border, card_bg, card_border, section_label_col, divider_col) =
+            match theme {
+                ThemeMode::Dark => (
+                    Color32::from_rgb(13, 14, 18),   // #0D0E12 deep obsidian canvas
+                    Color32::from_rgb(44, 49, 62),   // #2C313E crisp outer 1px border
+                    Color32::from_rgb(19, 21, 27),   // #13151B uniform matte card
+                    Color32::from_rgb(34, 38, 48),   // #222630 card hairline border
+                    Color32::from_rgb(122, 128, 144),
+                    Color32::from_rgb(32, 36, 45),
+                ),
+                ThemeMode::Light => (
+                    Color32::from_rgb(245, 246, 250),
+                    Color32::from_rgb(198, 204, 218),
+                    Color32::from_rgb(255, 255, 255),
+                    Color32::from_rgb(220, 224, 234),
+                    Color32::from_rgb(104, 110, 124),
+                    Color32::from_rgb(222, 226, 236),
+                ),
+            };
+
+        let default_accent = target_btn_info
+            .as_ref()
+            .map(|(_, _, _, acc, _)| *acc)
+            .unwrap_or(Color32::from_rgb(59, 130, 246));
+
+        CentralPanel::default()
+            .frame(
+                EguiFrame::none()
+                    .fill(canvas_bg)
+                    .stroke(Stroke::new(1.0, outer_border))
+                    .inner_margin(Margin::symmetric(10.0, 9.0)),
+            )
+            .show(vp_ctx, |ui| {
+                // Subtle 1px top-edge specular rim line on the context window
+                let full_rect = ui.max_rect();
+                if theme == ThemeMode::Dark {
+                    ui.painter().line_segment(
+                        [
+                            Pos2::new(full_rect.left() + 8.0, full_rect.top() + 0.5),
+                            Pos2::new(full_rect.right() - 8.0, full_rect.top() + 0.5),
+                        ],
+                        Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 18)),
+                    );
+                }
+
+                // ── Top Header Bar (Draggable + Close '×' Pill) ────────────────────
+                ui.horizontal(|ui| {
+                    if let Some((_, ref title, dir, accent, is_active)) = target_btn_info {
+                        let dot_col = if is_active {
+                            Color32::from_rgb(34, 197, 94)
+                        } else {
+                            accent
+                        };
+                        let (dot_rect, _) =
+                            ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
+                        ui.painter()
+                            .circle_filled(dot_rect.center(), 4.2, dot_col);
+                        ui.label(
+                            RichText::new(shorten_device_title(title))
+                                .size(12.5)
+                                .strong(),
+                        );
+                        let dir_tag = match dir {
+                            EndpointDirection::Output => "OUT",
+                            EndpointDirection::Input => "MIC",
+                        };
+                        ui.label(
+                            RichText::new(dir_tag)
+                                .size(9.5)
+                                .strong()
+                                .color(section_label_col),
+                        );
+                    } else {
+                        let (dot_rect, _) =
+                            ui.allocate_exact_size(Vec2::splat(9.0), Sense::hover());
+                        ui.painter().circle_filled(
+                            dot_rect.center(),
+                            3.6,
+                            Color32::from_rgb(59, 130, 246),
+                        );
+                        ui.label(
+                            RichText::new("LYRE QUICK ACTIONS")
+                                .size(10.5)
+                                .strong()
+                                .color(section_label_col),
+                        );
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (close_rect, close_resp) =
+                            ui.allocate_exact_size(Vec2::new(22.0, 20.0), Sense::click());
+                        if close_resp.hovered() {
+                            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                            ui.painter().rect_filled(
+                                close_rect,
+                                Rounding::same(5.0),
+                                if theme == ThemeMode::Dark {
+                                    Color32::from_rgb(34, 38, 48)
+                                } else {
+                                    Color32::from_rgb(226, 230, 240)
+                                },
+                            );
+                        }
+                        ui.painter().text(
+                            close_rect.center(),
+                            Align2::CENTER_CENTER,
+                            "×",
+                            FontId::new(14.0, FontFamily::Proportional),
+                            section_label_col,
+                        );
+                        if close_resp.clicked() {
+                            should_close = true;
+                        }
+                    });
+                });
+
+                ui.add_space(6.0);
+
+                let group_frame = EguiFrame::none()
+                    .fill(card_bg)
+                    .stroke(Stroke::new(1.0, card_border))
+                    .rounding(Rounding::same(8.0))
+                    .inner_margin(Margin::symmetric(6.0, 5.0));
+
+                // ── Section 1: Target Button Actions (when right-clicking a button) ──
+                if let Some((idx, _, _, accent, is_active)) = target_btn_info {
+                    group_frame.show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 2.0;
+
+                        let switch_badge = if is_active { "ACTIVE" } else { "Switch" };
+                        if draw_context_action_row(
+                            ui,
+                            "Switch Active Device",
+                            Some(switch_badge),
+                            Some(if is_active {
+                                Color32::from_rgb(34, 197, 94)
+                            } else {
+                                accent
+                            }),
+                            false,
+                            theme,
+                        )
+                        .clicked()
+                        {
+                            chosen_action = ContextMenuAction::SwitchButton(idx);
+                            should_close = true;
+                        }
+
+                        if draw_context_action_row(
+                            ui,
+                            "Customize Button…",
+                            Some("Edit"),
+                            None,
+                            false,
+                            theme,
+                        )
+                        .clicked()
+                        {
+                            chosen_action = ContextMenuAction::EditButton(idx);
+                            should_close = true;
+                        }
+
+                        if draw_context_action_row(
+                            ui,
+                            "Duplicate Button",
+                            Some("Copy"),
+                            None,
+                            false,
+                            theme,
+                        )
+                        .clicked()
+                        {
+                            chosen_action = ContextMenuAction::DuplicateButton(idx);
+                            should_close = true;
+                        }
+
+                        if draw_context_action_row(
+                            ui,
+                            "Delete Button",
+                            None,
+                            None,
+                            true,
+                            theme,
+                        )
+                        .clicked()
+                        {
+                            chosen_action = ContextMenuAction::DeleteButton(idx);
+                            should_close = true;
+                        }
+                    });
+
+                    ui.add_space(6.0);
+                }
+
+                // ── Section 2: Add Button & Audio Routing ───────────────────────────
+                group_frame.show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+
+                    if draw_context_action_row(
+                        ui,
+                        "+ Add New Audio Button…",
+                        Some("New"),
+                        Some(default_accent),
+                        false,
+                        theme,
+                    )
+                    .clicked()
+                    {
+                        chosen_action = ContextMenuAction::AddButton;
+                        should_close = true;
+                    }
+
+                    // Hairline divider
+                    let (div_rect, _) = ui.allocate_exact_size(
+                        Vec2::new(ui.available_width(), 5.0),
+                        Sense::hover(),
+                    );
+                    ui.painter().line_segment(
+                        [
+                            Pos2::new(div_rect.left() + 4.0, div_rect.center().y),
+                            Pos2::new(div_rect.right() - 4.0, div_rect.center().y),
+                        ],
+                        Stroke::new(1.0, divider_col),
+                    );
+
+                    if draw_context_toggle_row(
+                        ui,
+                        "Mute All Outputs",
+                        outputs_muted,
+                        Color32::from_rgb(239, 68, 68),
+                        None,
+                        theme,
+                    )
+                    .clicked()
+                    {
+                        chosen_action = ContextMenuAction::ToggleMuteOutputs;
+                    }
+
+                    if draw_context_toggle_row(
+                        ui,
+                        "Mute All Microphones",
+                        inputs_muted,
+                        Color32::from_rgb(239, 68, 68),
+                        None,
+                        theme,
+                    )
+                    .clicked()
+                    {
+                        chosen_action = ContextMenuAction::ToggleMuteInputs;
+                    }
+                });
+
+                ui.add_space(6.0);
+
+                // ── Section 3: Workspace & View Toggles ─────────────────────────────
+                group_frame.show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+
+                    if draw_context_toggle_row(
+                        ui,
+                        "Minimalist Frameless Mode",
+                        minimalist_mode,
+                        default_accent,
+                        Some("F2"),
+                        theme,
+                    )
+                    .clicked()
+                    {
+                        chosen_action = ContextMenuAction::ToggleMinimalist;
+                    }
+
+                    if draw_context_toggle_row(
+                        ui,
+                        "Dark Mode (Matte Obsidian)",
+                        dark_mode,
+                        default_accent,
+                        None,
+                        theme,
+                    )
+                    .clicked()
+                    {
+                        chosen_action = ContextMenuAction::ToggleTheme;
+                    }
+
+                    if draw_context_toggle_row(
+                        ui,
+                        "Show Text Labels",
+                        labels_shown,
+                        default_accent,
+                        None,
+                        theme,
+                    )
+                    .clicked()
+                    {
+                        chosen_action = ContextMenuAction::ToggleLabels;
+                    }
+
+                    if draw_context_toggle_row(
+                        ui,
+                        "Always on Top",
+                        always_on_top,
+                        default_accent,
+                        None,
+                        theme,
+                    )
+                    .clicked()
+                    {
+                        chosen_action = ContextMenuAction::ToggleAlwaysOnTop;
+                    }
+                });
+
+                ui.add_space(6.0);
+
+                // ── Section 4: Footer Actions (Hide to Tray / Quit Lyre) ─────────────
+                ui.columns(2, |cols| {
+                    if draw_context_footer_button(&mut cols[0], "Hide to Tray", false, theme)
+                        .clicked()
+                    {
+                        chosen_action = ContextMenuAction::HideToTray;
+                        should_close = true;
+                    }
+                    if draw_context_footer_button(&mut cols[1], "Quit Lyre", true, theme)
+                        .clicked()
+                    {
+                        chosen_action = ContextMenuAction::QuitApp;
+                        should_close = true;
+                    }
+                });
+            });
+    });
+
+    if should_close {
+        editor.context_menu = None;
+    } else {
+        menu_state.just_opened = false;
+        editor.context_menu = Some(menu_state);
+    }
+
+    chosen_action
+}
+
+/// Draws a sleek **Linear / Raycast Matte Obsidian** action row inside the context window.
+fn draw_context_action_row(
+    ui: &mut Ui,
+    label: &str,
+    right_badge: Option<&str>,
+    accent_dot: Option<Color32>,
+    destructive: bool,
+    theme: ThemeMode,
+) -> egui::Response {
+    let desired = Vec2::new(ui.available_width(), 27.0);
+    let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+
+    let (hover_bg, hover_border, text_col, badge_bg, badge_fg) = match theme {
+        ThemeMode::Dark => {
+            if destructive {
+                (
+                    Color32::from_rgba_unmultiplied(239, 68, 68, 30),
+                    Color32::from_rgba_unmultiplied(239, 68, 68, 120),
+                    Color32::from_rgb(248, 113, 113),
+                    Color32::from_rgb(32, 36, 45),
+                    Color32::from_rgb(156, 163, 175),
+                )
+            } else {
+                (
+                    Color32::from_rgb(30, 34, 43),
+                    Color32::from_rgb(50, 56, 70),
+                    if resp.hovered() {
+                        Color32::WHITE
+                    } else {
+                        Color32::from_rgb(228, 231, 239)
+                    },
+                    Color32::from_rgb(29, 32, 40),
+                    Color32::from_rgb(148, 155, 172),
+                )
+            }
+        }
+        ThemeMode::Light => {
+            if destructive {
+                (
+                    Color32::from_rgba_unmultiplied(220, 38, 38, 22),
+                    Color32::from_rgba_unmultiplied(220, 38, 38, 100),
+                    Color32::from_rgb(210, 32, 32),
+                    Color32::from_rgb(232, 235, 244),
+                    Color32::from_rgb(95, 100, 114),
+                )
+            } else {
+                (
+                    Color32::from_rgb(235, 238, 246),
+                    Color32::from_rgb(206, 212, 224),
+                    Color32::from_rgb(22, 24, 30),
+                    Color32::from_rgb(234, 237, 245),
+                    Color32::from_rgb(95, 100, 114),
+                )
+            }
+        }
+    };
+
+    if resp.hovered() {
+        let rounding = Rounding::same(6.0);
+        ui.painter().rect_filled(rect, rounding, hover_bg);
+        ui.painter()
+            .rect_stroke(rect, rounding, Stroke::new(1.0, hover_border));
+    }
+
+    let mut text_x = rect.left() + 8.0;
+    if let Some(dot_color) = accent_dot {
+        ui.painter().circle_filled(
+            Pos2::new(rect.left() + 11.0, rect.center().y),
+            3.5,
+            dot_color,
+        );
+        text_x = rect.left() + 21.0;
+    }
+
+    ui.painter().text(
+        Pos2::new(text_x, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::new(12.2, FontFamily::Proportional),
+        text_col,
+    );
+
+    if let Some(badge) = right_badge {
+        let font = FontId::new(10.0, FontFamily::Proportional);
+        let galley = ui
+            .painter()
+            .layout_no_wrap(badge.to_string(), font.clone(), badge_fg);
+        let bw = galley.size().x + 10.0;
+        let badge_rect = Rect::from_center_size(
+            Pos2::new(rect.right() - bw * 0.5 - 6.0, rect.center().y),
+            Vec2::new(bw, 17.0),
+        );
+        ui.painter()
+            .rect_filled(badge_rect, Rounding::same(4.0), badge_bg);
+        ui.painter().text(
+            badge_rect.center(),
+            Align2::CENTER_CENTER,
+            badge,
+            font,
+            badge_fg,
+        );
+    }
+
+    resp
+}
+
+/// Draws a sleek **Linear / Raycast Matte Obsidian** toggle row with an inline pill switch.
+fn draw_context_toggle_row(
+    ui: &mut Ui,
+    label: &str,
+    active: bool,
+    active_accent: Color32,
+    shortcut_badge: Option<&str>,
+    theme: ThemeMode,
+) -> egui::Response {
+    let desired = Vec2::new(ui.available_width(), 27.0);
+    let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+
+    let (hover_bg, hover_border, text_col, badge_bg, badge_fg) = match theme {
+        ThemeMode::Dark => (
+            Color32::from_rgb(30, 34, 43),
+            Color32::from_rgb(50, 56, 70),
+            if resp.hovered() || active {
+                Color32::WHITE
+            } else {
+                Color32::from_rgb(218, 222, 232)
+            },
+            Color32::from_rgb(29, 32, 40),
+            Color32::from_rgb(142, 148, 164),
+        ),
+        ThemeMode::Light => (
+            Color32::from_rgb(235, 238, 246),
+            Color32::from_rgb(206, 212, 224),
+            Color32::from_rgb(22, 24, 30),
+            Color32::from_rgb(234, 237, 245),
+            Color32::from_rgb(95, 100, 114),
+        ),
+    };
+
+    if resp.hovered() {
+        let rounding = Rounding::same(6.0);
+        ui.painter().rect_filled(rect, rounding, hover_bg);
+        ui.painter()
+            .rect_stroke(rect, rounding, Stroke::new(1.0, hover_border));
+    }
+
+    ui.painter().text(
+        Pos2::new(rect.left() + 8.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::new(12.2, FontFamily::Proportional),
+        text_col,
+    );
+
+    // Inline Linear pill toggle switch on the right
+    let switch_rect = Rect::from_center_size(
+        Pos2::new(rect.right() - 21.0, rect.center().y),
+        Vec2::new(30.0, 16.0),
+    );
+    let (track_bg, track_border) = if active {
+        (active_accent, active_accent)
+    } else {
+        match theme {
+            ThemeMode::Dark => (
+                Color32::from_rgb(30, 33, 41),
+                Color32::from_rgb(52, 56, 68),
+            ),
+            ThemeMode::Light => (
+                Color32::from_rgb(214, 218, 228),
+                Color32::from_rgb(186, 192, 204),
+            ),
+        }
+    };
+    ui.painter()
+        .rect_filled(switch_rect, Rounding::same(8.0), track_bg);
+    ui.painter()
+        .rect_stroke(switch_rect, Rounding::same(8.0), Stroke::new(1.0, track_border));
+
+    let knob_x = if active {
+        switch_rect.right() - 8.0
+    } else {
+        switch_rect.left() + 8.0
+    };
+    ui.painter().circle_filled(
+        Pos2::new(knob_x, switch_rect.center().y),
+        5.6,
+        Color32::WHITE,
+    );
+
+    if let Some(badge) = shortcut_badge {
+        let font = FontId::new(9.8, FontFamily::Proportional);
+        let galley = ui
+            .painter()
+            .layout_no_wrap(badge.to_string(), font.clone(), badge_fg);
+        let bw = galley.size().x + 9.0;
+        let badge_rect = Rect::from_center_size(
+            Pos2::new(switch_rect.left() - bw * 0.5 - 6.0, rect.center().y),
+            Vec2::new(bw, 16.0),
+        );
+        ui.painter()
+            .rect_filled(badge_rect, Rounding::same(4.0), badge_bg);
+        ui.painter().text(
+            badge_rect.center(),
+            Align2::CENTER_CENTER,
+            badge,
+            font,
+            badge_fg,
+        );
+    }
+
+    resp
+}
+
+/// Draws a sleek footer pill button (`Hide to Tray` or `Quit Lyre`) at the bottom of the context window.
+fn draw_context_footer_button(
+    ui: &mut Ui,
+    label: &str,
+    destructive: bool,
+    theme: ThemeMode,
+) -> egui::Response {
+    let desired = Vec2::new(ui.available_width(), 28.0);
+    let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+
+    let (bg, border, text_col) = match theme {
+        ThemeMode::Dark => {
+            if destructive {
+                if resp.hovered() {
+                    (
+                        Color32::from_rgba_unmultiplied(239, 68, 68, 42),
+                        Color32::from_rgb(239, 68, 68),
+                        Color32::WHITE,
+                    )
+                } else {
+                    (
+                        Color32::from_rgba_unmultiplied(239, 68, 68, 18),
+                        Color32::from_rgba_unmultiplied(239, 68, 68, 95),
+                        Color32::from_rgb(248, 113, 113),
+                    )
+                }
+            } else if resp.hovered() {
+                (
+                    Color32::from_rgb(30, 34, 43),
+                    Color32::from_rgb(56, 62, 76),
+                    Color32::WHITE,
+                )
+            } else {
+                (
+                    Color32::from_rgb(19, 21, 27),
+                    Color32::from_rgb(36, 40, 50),
+                    Color32::from_rgb(208, 213, 225),
+                )
+            }
+        }
+        ThemeMode::Light => {
+            if destructive {
+                (
+                    Color32::from_rgba_unmultiplied(220, 38, 38, 18),
+                    Color32::from_rgba_unmultiplied(220, 38, 38, 110),
+                    Color32::from_rgb(200, 30, 30),
+                )
+            } else {
+                (
+                    Color32::from_rgb(255, 255, 255),
+                    Color32::from_rgb(212, 216, 228),
+                    Color32::from_rgb(36, 40, 50),
+                )
+            }
+        }
+    };
+
+    let rounding = Rounding::same(7.0);
+    ui.painter().rect_filled(rect, rounding, bg);
+    ui.painter()
+        .rect_stroke(rect, rounding, Stroke::new(1.0, border));
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        FontId::new(11.8, FontFamily::Proportional),
+        text_col,
     );
 
     resp
