@@ -160,7 +160,14 @@
 - [x] **10.2** Replace the classic OS right-click menu with a custom frameless **Linear / Raycast Matte Obsidian** right-click context window (`render_context_menu_viewport` in `src/ui/settings_panel.rs`, `compute_same_monitor_cursor_menu_pos` in `src/tray/win32_window.rs`, and `src/app.rs`), plus enable Win32 dark mode (`uxtheme.dll`) for the System Tray menu.
 - [x] **10.3** **Verification Gate 10:** Run `cargo test`, build release binary (`cargo build --release`), commit to Git, and launch.
 
+### Checkpoint 11: +50% Button Image Size, `Bitcount_Prop_Single` Font, Icon Toolbar with Centered Columns & Mic Mute, Title Bar Logo (`logo.png`), Vector Arrow Icons & Hard Minimum Dialog Size
+- [x] **11.1** Increase button image size by 50% (`0.585 * unit_l` with label, `0.72 * unit_l` icon-only), reduce label font size (`0.095 * unit_l`) to fit cleanly, and register `Bitcount_Prop_Single` (`assets/fonts/Bitcount_Prop_Single/static/BitcountPropSingle-Medium.ttf`) for button labels, badges, and tags (`src/ui/theme.rs`, `src/ui/button_widget.rs`).
+- [x] **11.2** Add custom vector icons (`ToolbarIcon`) to all top toolbar buttons, move the `Columns` selector to the middle of the toolbar, and add a `Mute Mic` button alongside `Mute Out` differentiated by Studio Microphone vs Speaker vector icons (`src/ui/settings_panel.rs`).
+- [x] **11.3** Use `logo.png` (logo with background) for the window title bar logo (`load_embedded_egui_icon` in `src/tray/mod.rs`) while keeping `logo_bg.png` (no background) for the taskbar / system tray icon.
+- [x] **11.4** Replace missing arrow glyphs on `Move Left` and `Move Right` in the Customize Button dialog with crisp vector arrows (`ToolbarIcon::ArrowLeft`, `ToolbarIcon::ArrowRight`), and enforce a hard minimum size limit (`480×620`) so no dialog elements get hidden behind the edge (`src/ui/settings_panel.rs`).
+- [x] **11.5** **Verification Gate 11:** Run `cargo test`, build release binary (`cargo build --release`), commit to Git, and launch.
+
 ---
 
 ## Checkpoint Progress Log
-- **Current Phase:** All Checkpoints (0 through 10) Completed and Verified.
+- **Current Phase:** All Checkpoints (0 through 11) Completed and Verified.

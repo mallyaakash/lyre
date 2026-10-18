@@ -1,11 +1,11 @@
 use egui::{
-    Align2, Color32, CursorIcon, FontFamily, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2,
+    Align2, Color32, CursorIcon, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2,
 };
 
 use crate::audio::EndpointDirection;
 use crate::config::{ButtonConfig, IconSource, ThemeMode};
 use crate::ui::icons::IconCache;
-use crate::ui::theme::resolve_button_palette;
+use crate::ui::theme::{button_font_family, resolve_button_palette};
 
 /// Computed proportional metrics for a button of cell size `(width, height)`.
 #[derive(Debug, Clone, Copy)]
@@ -32,18 +32,20 @@ impl ProportionalButtonMetrics {
         let corner_radius = (0.14 * unit_l).clamp(4.0, 22.0);
         let base_stroke_width = (1.15 * scale_s).clamp(1.0, 3.0);
 
+        // Button image size increased by 50% (0.39 * 1.5 = 0.585 when label shown; 0.72 when icon-only)
         let (icon_size, icon_center_offset_y) = if show_label {
-            (0.39 * unit_l, -0.05 * unit_l)
+            (0.585 * unit_l, -0.025 * unit_l)
         } else {
-            (0.50 * unit_l, 0.04 * unit_l)
+            (0.72 * unit_l, 0.03 * unit_l)
         };
 
-        let badge_radius = (0.20 * icon_size).max(5.5);
-        let badge_offset = Vec2::new(0.42 * icon_size, -0.40 * icon_size);
-        let badge_font_size = (1.26 * badge_radius).clamp(7.0, 34.0);
+        let badge_radius = (0.135 * icon_size).max(5.5);
+        let badge_offset = Vec2::new(0.35 * icon_size, -0.33 * icon_size);
+        let badge_font_size = (1.20 * badge_radius).clamp(6.8, 30.0);
 
-        let label_font_size = (0.122 * unit_l).clamp(7.5, 25.0);
-        let label_offset_y = 0.31 * unit_l;
+        // Reduced text font size and lowered vertical offset so it fits cleanly beneath the 50% larger icon
+        let label_font_size = (0.095 * unit_l).clamp(6.5, 18.5);
+        let label_offset_y = 0.37 * unit_l;
 
         Self {
             unit_l,
@@ -205,9 +207,14 @@ pub fn draw_audio_button(
     );
 
     if matches!(btn.icon, IconSource::Preset(_)) {
-        let well_size = (metrics.icon_size * 1.34).min(draw_rect.height() * 0.56);
+        let max_well_h = if btn.show_label {
+            draw_rect.height() * 0.56
+        } else {
+            draw_rect.height() * 0.72
+        };
+        let well_size = (metrics.icon_size * 0.98).min(max_well_h).min(draw_rect.width() * 0.76);
         let well_rect = Rect::from_center_size(icon_center, Vec2::splat(well_size));
-        let well_rounding = Rounding::same((well_size * 0.26).clamp(4.0, 14.0));
+        let well_rounding = Rounding::same((well_size * 0.24).clamp(4.0, 14.0));
         painter.rect_filled(well_rect, well_rounding, palette.icon_well_fill);
         painter.rect_stroke(
             well_rect,
@@ -216,9 +223,14 @@ pub fn draw_audio_button(
         );
     }
 
+    let max_icon_bound = if btn.show_label {
+        draw_rect.height() * 0.58
+    } else {
+        draw_rect.height() * 0.74
+    };
     let icon_draw_size = match btn.icon {
-        IconSource::Preset(_) => metrics.icon_size * 0.84,
-        IconSource::CustomPath(_) => metrics.icon_size * 1.12,
+        IconSource::Preset(_) => (metrics.icon_size * 0.84).min(max_icon_bound * 0.92),
+        IconSource::CustomPath(_) => (metrics.icon_size * 1.06).min(max_icon_bound),
     };
     let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_draw_size));
 
@@ -242,6 +254,8 @@ pub fn draw_audio_button(
         );
     }
 
+    let btn_font = button_font_family(ui.ctx());
+
     // 6. Optional Circular Corner Number Badge (1, 2, 3...) overlapping top-right of the icon well
     if btn.badge_enabled {
         let badge_center = icon_center + metrics.badge_offset;
@@ -255,14 +269,14 @@ pub fn draw_audio_button(
             badge_center,
             Align2::CENTER_CENTER,
             btn.badge_number.to_string(),
-            FontId::new(metrics.badge_font_size, FontFamily::Proportional),
+            FontId::new(metrics.badge_font_size, btn_font.clone()),
             palette.badge_fg,
         );
     }
 
     // 7. Subtle Input ("MIC") / Output ("OUT") micro-tag in top-left corner
     if btn.direction == EndpointDirection::Input || edit_mode {
-        let tag_font = (0.084 * metrics.unit_l).clamp(6.5, 10.5);
+        let tag_font = (0.078 * metrics.unit_l).clamp(6.0, 10.0);
         let tag_text = match btn.direction {
             EndpointDirection::Output => "OUT",
             EndpointDirection::Input => "MIC",
@@ -275,18 +289,18 @@ pub fn draw_audio_button(
             tag_pos,
             Align2::LEFT_TOP,
             tag_text,
-            FontId::new(tag_font, FontFamily::Proportional),
+            FontId::new(tag_font, btn_font.clone()),
             palette.subtext_color,
         );
     }
 
-    // 8. Optional Text Label ("Icon + Text Title" vs "Icon-Only")
+    // 8. Optional Text Label ("Icon + Text Title" vs "Icon-Only") rendered in Bitcount Prop Single
     if btn.show_label && !btn.title.is_empty() {
         let label_pos = Pos2::new(
             draw_rect.center().x,
             draw_rect.center().y + metrics.label_offset_y,
         );
-        let max_chars = ((draw_rect.width() * 0.88) / (metrics.label_font_size * 0.53))
+        let max_chars = ((draw_rect.width() * 0.90) / (metrics.label_font_size * 0.56))
             .floor()
             .max(4.0) as usize;
         let display_title = if btn.title.chars().count() > max_chars {
@@ -300,7 +314,7 @@ pub fn draw_audio_button(
             label_pos,
             Align2::CENTER_CENTER,
             display_title,
-            FontId::new(metrics.label_font_size, FontFamily::Proportional),
+            FontId::new(metrics.label_font_size, btn_font),
             palette.text_color,
         );
     }

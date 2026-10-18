@@ -486,7 +486,8 @@ fn crop_transparent_logo_to_square(img: &image::DynamicImage) -> image::RgbaImag
     square
 }
 
-/// Loads `logo_bg.png` (transparent background, embedded at compile time) as a 64x64 RGBA `tray_icon::Icon`.
+/// Loads `logo_bg.png` (transparent background, embedded at compile time) as a 64x64 RGBA `tray_icon::Icon`
+/// for the Windows Taskbar / System Tray notification area.
 pub fn load_embedded_tray_icon() -> Result<Icon, String> {
     let bytes = include_bytes!("../../logo_bg.png");
     let img = image::load_from_memory(bytes)
@@ -498,15 +499,16 @@ pub fn load_embedded_tray_icon() -> Result<Icon, String> {
         .map_err(|e| format!("Failed to construct tray Icon: {}", e))
 }
 
-/// Loads `logo_bg.png` (transparent background, embedded at compile time) as a 64x64 RGBA `egui::IconData`.
+/// Loads `logo.png` (logo with background, embedded at compile time) as a 64x64 RGBA `egui::IconData`
+/// for the window title bar icon.
 pub fn load_embedded_egui_icon() -> Option<egui::IconData> {
-    let bytes = include_bytes!("../../logo_bg.png");
+    let bytes = include_bytes!("../../logo.png");
     let img = image::load_from_memory(bytes).ok()?;
-    let square = crop_transparent_logo_to_square(&img);
-    let resized = image::imageops::resize(&square, 64, 64, image::imageops::FilterType::Lanczos3);
-    let (width, height) = resized.dimensions();
+    let resized = img.resize_exact(64, 64, image::imageops::FilterType::Lanczos3);
+    let rgba = resized.to_rgba8();
+    let (width, height) = rgba.dimensions();
     Some(egui::IconData {
-        rgba: resized.into_raw(),
+        rgba: rgba.into_raw(),
         width,
         height,
     })

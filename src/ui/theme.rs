@@ -1,6 +1,50 @@
-use egui::{Color32, Rounding, Stroke, Style, Visuals};
+use egui::{Color32, FontData, FontDefinitions, FontFamily, Id, Rounding, Stroke, Style, Visuals};
 
 use crate::config::{parse_hex_color, ThemeMode};
+
+pub const BUTTON_FONT_FAMILY_NAME: &str = "bitcount_button";
+
+/// Returns the custom `FontFamily` (`Bitcount Prop Single`) used for rendering audio button labels and badges.
+/// Automatically ensures the custom font is registered and safely falls back to `Proportional` if called mid-frame before atlas rebuild.
+pub fn button_font_family(ctx: &egui::Context) -> FontFamily {
+    ensure_custom_fonts(ctx);
+    let custom = FontFamily::Name(BUTTON_FONT_FAMILY_NAME.into());
+    let is_bound = ctx.fonts(|f| f.families().contains(&custom));
+    if is_bound {
+        custom
+    } else {
+        FontFamily::Proportional
+    }
+}
+
+/// Ensures `BitcountPropSingle-Medium.ttf` from `assets/fonts/Bitcount_Prop_Single` is registered
+/// in the `egui::Context` under `button_font_family()` (with fallback to the default proportional font).
+pub fn ensure_custom_fonts(ctx: &egui::Context) {
+    let font_init_id = Id::new("lyre_bitcount_font_installed");
+    let already_installed = ctx.data(|d| d.get_temp::<bool>(font_init_id).unwrap_or(false));
+    if already_installed {
+        return;
+    }
+
+    let mut fonts = FontDefinitions::default();
+    fonts.font_data.insert(
+        "bitcount_prop_single".to_owned(),
+        FontData::from_static(include_bytes!(
+            "../../assets/fonts/Bitcount_Prop_Single/static/BitcountPropSingle-Medium.ttf"
+        )),
+    );
+
+    let mut family_list = vec!["bitcount_prop_single".to_owned()];
+    if let Some(default_prop) = fonts.families.get(&FontFamily::Proportional) {
+        family_list.extend(default_prop.iter().cloned());
+    }
+    fonts
+        .families
+        .insert(FontFamily::Name(BUTTON_FONT_FAMILY_NAME.into()), family_list);
+
+    ctx.set_fonts(fonts);
+    ctx.data_mut(|d| d.insert_temp(font_init_id, true));
+}
 
 /// Resolved visual colors for rendering a single audio device button
 /// in the **Linear / Raycast Matte Obsidian** design system.
@@ -21,8 +65,9 @@ pub struct ButtonVisualPalette {
 }
 
 /// Applies global `egui` visuals for either Dark Mode (Linear / Raycast Matte Obsidian)
-/// or Light Mode (Clean Alabaster Slate).
+/// or Light Mode (Clean Alabaster Slate), and ensures the custom button font is loaded.
 pub fn apply_theme(ctx: &egui::Context, mode: ThemeMode) {
+    ensure_custom_fonts(ctx);
     let mut style: Style = (*ctx.style()).clone();
     let visuals = match mode {
         ThemeMode::Dark => {
