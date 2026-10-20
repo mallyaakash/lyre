@@ -21,6 +21,24 @@ extern "system" {
     fn GetProcAddress(h_module: *mut c_void, lp_proc_name: *const u8) -> *const c_void;
 }
 
+#[link(name = "user32")]
+extern "system" {
+    fn CreateIconFromResourceEx(
+        presbits: *const u8,
+        dw_res_size: u32,
+        f_icon: i32,
+        dw_ver: u32,
+        cx_desired: i32,
+        cy_desired: i32,
+        flags: u32,
+    ) -> isize;
+    fn SendMessageW(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize;
+}
+
+const WM_SETICON: u32 = 0x0080;
+const ICON_SMALL: usize = 0;
+const ICON_BIG: usize = 1;
+
 /// Extracts the raw Win32 `HWND` (as `isize`) from any `HasWindowHandle` provider.
 pub fn extract_hwnd(window_handle_provider: &dyn HasWindowHandle) -> Option<isize> {
     let handle = window_handle_provider.window_handle().ok()?;
@@ -53,8 +71,10 @@ pub fn enable_win32_dark_menus(dark: bool) {
     }
 }
 
-/// Applies `WS_EX_TOOLWINDOW` and strips `WS_EX_APPWINDOW` on the given Win32 `HWND`
-/// so Windows never shows an icon for Lyre on the Taskbar, and enables DWM rounded corners.
+/// Applies `WS_EX_APPWINDOW` and strips `WS_EX_TOOLWINDOW` on the given Win32 `HWND`
+/// so Windows always displays Lyre on the Taskbar when visible (even in frameless Minimalist Mode),
+/// sets the Taskbar icon (`ICON_BIG`) to `logo_bg.png` (no background) and the Title Bar icon
+/// (`ICON_SMALL`) to `logo.png` (with background), and enables DWM rounded corners.
 pub fn apply_tool_window_style(hwnd_val: isize) {
     if hwnd_val == 0 {
         return;
@@ -62,7 +82,7 @@ pub fn apply_tool_window_style(hwnd_val: isize) {
     let hwnd = HWND(hwnd_val as *mut c_void);
     unsafe {
         let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        let new_style = (ex_style | (WS_EX_TOOLWINDOW.0 as isize)) & !(WS_EX_APPWINDOW.0 as isize);
+        let new_style = (ex_style | (WS_EX_APPWINDOW.0 as isize)) & !(WS_EX_TOOLWINDOW.0 as isize);
         if new_style != ex_style {
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
             let _ = SetWindowPos(
@@ -84,6 +104,53 @@ pub fn apply_tool_window_style(hwnd_val: isize) {
             &corner_pref as *const _ as *const c_void,
             std::mem::size_of_val(&corner_pref) as u32,
         );
+
+        // Set Taskbar icon (ICON_BIG) to logo_bg.png (no background) and Title Bar icon (ICON_SMALL) to logo.png (with background)
+        apply_taskbar_and_titlebar_icons_win32(hwnd_val);
+    }
+}
+
+/// Sets `ICON_BIG` (Taskbar / Alt+Tab icon) to `logo_bg.png` (transparent background) and
+/// `ICON_SMALL` (Window Title Bar icon) to `logo.png` (with background) once per HWND.
+pub fn apply_taskbar_and_titlebar_icons_win32(hwnd_val: isize) {
+    use std::sync::OnceLock;
+    if hwnd_val == 0 {
+        return;
+    }
+
+    static ICONS: OnceLock<(isize, isize)> = OnceLock::new();
+    let &(hicon_big, hicon_small) = ICONS.get_or_init(|| unsafe {
+        let logo_bg_bytes = include_bytes!("../../logo_bg.png");
+        let logo_with_bg_bytes = include_bytes!("../../logo.png");
+
+        let big = CreateIconFromResourceEx(
+            logo_bg_bytes.as_ptr(),
+            logo_bg_bytes.len() as u32,
+            1,
+            0x00030000,
+            64,
+            64,
+            0,
+        );
+        let small = CreateIconFromResourceEx(
+            logo_with_bg_bytes.as_ptr(),
+            logo_with_bg_bytes.len() as u32,
+            1,
+            0x00030000,
+            24,
+            24,
+            0,
+        );
+        (big, small)
+    });
+
+    unsafe {
+        if hicon_big != 0 {
+            let _ = SendMessageW(hwnd_val as *mut c_void, WM_SETICON, ICON_BIG, hicon_big);
+        }
+        if hicon_small != 0 {
+            let _ = SendMessageW(hwnd_val as *mut c_void, WM_SETICON, ICON_SMALL, hicon_small);
+        }
     }
 }
 

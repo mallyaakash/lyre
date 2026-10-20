@@ -110,6 +110,7 @@ pub enum ToolbarIcon {
     ColumnsGrid,
     Plus,
     Minimalist,
+    Pin { pinned: bool },
     ArrowLeft,
     ArrowRight,
     Trash,
@@ -279,6 +280,39 @@ pub fn draw_toolbar_icon(
             painter.line_segment([Pos2::new(center.x + d, center.y + d), Pos2::new(center.x + d - l, center.y + d)], stroke);
             painter.line_segment([Pos2::new(center.x + d, center.y + d), Pos2::new(center.x + d, center.y + d - l)], stroke);
         }
+        ToolbarIcon::Pin { pinned } => {
+            let pin_col = if pinned {
+                Color32::from_rgb(59, 130, 246)
+            } else {
+                color
+            };
+            let s = Stroke::new(1.55, pin_col);
+            // Top pushpin cap bar
+            painter.line_segment(
+                [Pos2::new(center.x - 3.2, center.y - 5.0), Pos2::new(center.x + 3.2, center.y - 5.0)],
+                Stroke::new(1.75, pin_col),
+            );
+            // Pin upper cylinder body
+            let body_rect = Rect::from_min_max(
+                Pos2::new(center.x - 2.1, center.y - 5.0),
+                Pos2::new(center.x + 2.1, center.y - 0.6),
+            );
+            if pinned {
+                painter.rect_filled(body_rect, Rounding::same(0.8), pin_col);
+            } else {
+                painter.rect_stroke(body_rect, Rounding::same(0.8), s);
+            }
+            // Lower flange bar
+            painter.line_segment(
+                [Pos2::new(center.x - 4.4, center.y - 0.6), Pos2::new(center.x + 4.4, center.y - 0.6)],
+                Stroke::new(1.75, pin_col),
+            );
+            // Sharp needle stem pointing down
+            painter.line_segment(
+                [Pos2::new(center.x, center.y - 0.6), Pos2::new(center.x, center.y + 5.2)],
+                Stroke::new(1.65, pin_col),
+            );
+        }
         ToolbarIcon::ArrowLeft => {
             let s = Stroke::new(1.75, color);
             painter.line_segment(
@@ -352,11 +386,16 @@ pub fn pill_button_with_icon(
     theme_mode: ThemeMode,
 ) -> egui::Response {
     let font_id = FontId::new(12.2, FontFamily::Proportional);
-    let galley = ui
-        .painter()
-        .layout_no_wrap(text.to_string(), font_id.clone(), Color32::WHITE);
-    let icon_pad = if icon.is_some() { 18.0 } else { 0.0 };
-    let desired_size = Vec2::new(galley.size().x + 18.0 + icon_pad, 26.0);
+    let is_icon_only = text.is_empty() && icon.is_some();
+    let desired_size = if is_icon_only {
+        Vec2::new(28.0, 26.0)
+    } else {
+        let galley = ui
+            .painter()
+            .layout_no_wrap(text.to_string(), font_id.clone(), Color32::WHITE);
+        let icon_pad = if icon.is_some() { 18.0 } else { 0.0 };
+        Vec2::new(galley.size().x + 18.0 + icon_pad, 26.0)
+    };
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(desired_size, sense);
 
@@ -461,15 +500,19 @@ pub fn pill_button_with_icon(
         .rect_stroke(rect, rounding, Stroke::new(1.0, border_col));
 
     if let Some(ic) = icon {
-        let icon_center = Pos2::new(rect.left() + 13.5, rect.center().y);
-        draw_toolbar_icon(ui.painter(), icon_center, ic, text_col);
-        ui.painter().text(
-            Pos2::new(rect.left() + 24.5, rect.center().y),
-            Align2::LEFT_CENTER,
-            text,
-            font_id,
-            text_col,
-        );
+        if is_icon_only {
+            draw_toolbar_icon(ui.painter(), rect.center(), ic, text_col);
+        } else {
+            let icon_center = Pos2::new(rect.left() + 13.5, rect.center().y);
+            draw_toolbar_icon(ui.painter(), icon_center, ic, text_col);
+            ui.painter().text(
+                Pos2::new(rect.left() + 24.5, rect.center().y),
+                Align2::LEFT_CENTER,
+                text,
+                font_id,
+                text_col,
+            );
+        }
     } else {
         ui.painter().text(
             rect.center(),
@@ -591,7 +634,30 @@ pub fn render_top_config_bar(
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(5.0, 4.0);
 
-        // ── 1. LEFT GROUP: Theme, Labels, Mute Outputs (Speaker), Mute Inputs (Mic) ──
+        // ── 1. LEFT GROUP: Pin on Top (icon-only), Theme, Labels, Mute Outputs, Mute Inputs ──
+        let is_pinned = config.window.always_on_top;
+        let pin_tooltip = if is_pinned {
+            "Always on Top: On (Click to unpin window)"
+        } else {
+            "Always on Top: Off (Click to pin window above other apps)"
+        };
+        if pill_button_with_icon(
+            ui,
+            Some(ToolbarIcon::Pin { pinned: is_pinned }),
+            "",
+            is_pinned,
+            is_pinned,
+            false,
+            true,
+            theme,
+        )
+        .on_hover_text(pin_tooltip)
+        .clicked()
+        {
+            config.window.always_on_top = !config.window.always_on_top;
+            changed = true;
+        }
+
         let (theme_icon, theme_label) = match config.window.theme_mode {
             ThemeMode::Dark => (ToolbarIcon::ThemeMoon, "Dark"),
             ThemeMode::Light => (ToolbarIcon::ThemeSun, "Light"),

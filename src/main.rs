@@ -26,11 +26,11 @@ fn main() -> eframe::Result<()> {
     // 3. Initialize Windows System Tray icon & native right-click context menu
     let tray_manager = TrayManager::new(app_config.window.always_on_top).ok();
 
-    // 4. Configure eframe Viewport (hidden from Windows Taskbar, frameless in Minimalist Mode)
+    // 4. Configure eframe Viewport (shown on Windows Taskbar when visible, frameless in Minimalist Mode)
     let mut viewport = ViewportBuilder::default()
         .with_title("Lyre — Audio Switcher")
         .with_app_id("com.lyre.audioswitcher")
-        .with_taskbar(false)
+        .with_taskbar(true)
         .with_decorations(!app_config.window.minimalist_mode)
         .with_inner_size([app_config.window.width, app_config.window.height])
         .with_min_inner_size([110.0, 68.0])

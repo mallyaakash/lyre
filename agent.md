@@ -167,7 +167,12 @@
 - [x] **11.4** Replace missing arrow glyphs on `Move Left` and `Move Right` in the Customize Button dialog with crisp vector arrows (`ToolbarIcon::ArrowLeft`, `ToolbarIcon::ArrowRight`), and enforce a hard minimum size limit (`480×620`) so no dialog elements get hidden behind the edge (`src/ui/settings_panel.rs`).
 - [x] **11.5** **Verification Gate 11:** Run `cargo test`, build release binary (`cargo build --release`), commit to Git, and launch.
 
+### Checkpoint 12: Windows Taskbar Presence (`WS_EX_APPWINDOW`, `ICON_BIG` = `logo_bg.png`, `ICON_SMALL` = `logo.png`) & Icon-Only Pin on Top Button in Menu Bar
+- [x] **12.1** Enable Windows Taskbar presence when running (`.with_taskbar(true)` in `src/main.rs` and `WS_EX_APPWINDOW` without `WS_EX_TOOLWINDOW` in `src/tray/win32_window.rs`), while setting `ICON_BIG` (Taskbar icon) to `logo_bg.png` (no background) and `ICON_SMALL` (Title Bar icon) to `logo.png` (with background) via `WM_SETICON`.
+- [x] **12.2** Add an icon-only **Pin on Top (Always on Top)** toggle button (`ToolbarIcon::Pin { pinned }`) to the top menu bar (`src/ui/settings_panel.rs`).
+- [x] **12.3** **Verification Gate 12:** Run `cargo test`, build release binary (`cargo build --release`), commit to Git, and launch.
+
 ---
 
 ## Checkpoint Progress Log
-- **Current Phase:** All Checkpoints (0 through 11) Completed and Verified.
+- **Current Phase:** All Checkpoints (0 through 12) Completed and Verified.
