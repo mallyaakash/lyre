@@ -172,7 +172,13 @@
 - [x] **12.2** Add an icon-only **Pin on Top (Always on Top)** toggle button (`ToolbarIcon::Pin { pinned }`) to the top menu bar (`src/ui/settings_panel.rs`).
 - [x] **12.3** **Verification Gate 12:** Run `cargo test`, build release binary (`cargo build --release`), commit to Git, and launch.
 
+### Checkpoint 13: Custom Image Filename/Path Wrapping, Fixed-Size Customize Button Window & Simplified Custom Image Label
+- [x] **13.1** Add text wrapping (`egui::text::LayoutJob::simple` with `wrap.break_anywhere = true`) to the custom image button filename and file path (`draw_prominent_upload_button` in `src/ui/settings_panel.rs`) and dynamically expand the upload card height so long paths never overlap the `"Change"` / `"Browse…"` pill.
+- [x] **13.2** Lock the Customize Button dialog window to a fixed size (`488×656`, `.with_resizable(false)`, `.with_maximize_button(false)`, `with_min_inner_size == with_max_inner_size`) so it cannot be resized (`render_button_editor_modal` in `src/ui/settings_panel.rs`).
+- [x] **13.3** Remove `"Transparent Artwork"` text so the section header is `"CUSTOM IMAGE"` and the upload button title is `"Upload Custom Image…"` (`src/ui/settings_panel.rs`).
+- [x] **13.4** **Verification Gate 13:** Run `cargo test`, build release binary (`cargo build --release`), commit to Git, and launch.
+
 ---
 
 ## Checkpoint Progress Log
-- **Current Phase:** All Checkpoints (0 through 12) Completed and Verified.
+- **Current Phase:** All Checkpoints (0 through 13) Completed and Verified.

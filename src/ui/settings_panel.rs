@@ -819,10 +819,9 @@ pub fn render_top_config_bar(
     changed
 }
 
-/// Hard minimum dimensions for the Customize Button dialog so no controls or tiles
-/// can ever get clipped or hidden behind the window edge.
-const MIN_CUSTOMIZE_DIALOG_WIDTH: f32 = 480.0;
-const MIN_CUSTOMIZE_DIALOG_HEIGHT: f32 = 620.0;
+/// Fixed dimensions for the Customize Button dialog (non-resizable).
+const CUSTOMIZE_DIALOG_WIDTH: f32 = 488.0;
+const CUSTOMIZE_DIALOG_HEIGHT: f32 = 656.0;
 
 /// Renders the per-button customization dialog inside an **independent native OS viewport**
 /// (`ctx.show_viewport_immediate`) positioned on the **same monitor** as the main app window.
@@ -846,8 +845,8 @@ pub fn render_button_editor_modal(
         return false;
     }
 
-    let dialog_w = 488.0;
-    let dialog_h = 626.0;
+    let dialog_w = CUSTOMIZE_DIALOG_WIDTH;
+    let dialog_h = CUSTOMIZE_DIALOG_HEIGHT;
     let just_opened = !editor.was_open;
 
     if just_opened || editor.dialog_spawn_pos.is_none() {
@@ -879,10 +878,12 @@ pub fn render_button_editor_modal(
     let mut viewport_builder = ViewportBuilder::default()
         .with_title(format!("Lyre — Customize Button #{}", idx + 1))
         .with_inner_size([dialog_w, dialog_h])
-        .with_min_inner_size([MIN_CUSTOMIZE_DIALOG_WIDTH, MIN_CUSTOMIZE_DIALOG_HEIGHT])
+        .with_min_inner_size([dialog_w, dialog_h])
+        .with_max_inner_size([dialog_w, dialog_h])
         .with_always_on_top()
         .with_taskbar(false)
-        .with_resizable(true);
+        .with_maximize_button(false)
+        .with_resizable(false);
 
     if let Some(icon) = crate::tray::load_embedded_egui_icon() {
         viewport_builder = viewport_builder.with_icon(std::sync::Arc::new(icon));
@@ -901,20 +902,10 @@ pub fn render_button_editor_modal(
     ctx.show_viewport_immediate(viewport_id, viewport_builder, |vp_ctx, class| {
         apply_theme(vp_ctx, theme);
 
-        // Enforce hard minimum size limit so elements can never be hidden behind the edge
-        vp_ctx.send_viewport_cmd(ViewportCommand::MinInnerSize(Vec2::new(
-            MIN_CUSTOMIZE_DIALOG_WIDTH,
-            MIN_CUSTOMIZE_DIALOG_HEIGHT,
-        )));
-        if let Some(inner) = vp_ctx.input(|i| i.viewport().inner_rect) {
-            if inner.width() < MIN_CUSTOMIZE_DIALOG_WIDTH - 1.0
-                || inner.height() < MIN_CUSTOMIZE_DIALOG_HEIGHT - 1.0
-            {
-                vp_ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(
-                    inner.width().max(MIN_CUSTOMIZE_DIALOG_WIDTH),
-                    inner.height().max(MIN_CUSTOMIZE_DIALOG_HEIGHT),
-                )));
-            }
+        // Lock window to fixed non-resizable dimensions
+        if just_opened {
+            vp_ctx.send_viewport_cmd(ViewportCommand::Resizable(false));
+            vp_ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(dialog_w, dialog_h)));
         }
 
         if let Some(pos) = spawn_pos_for_first_frame {
@@ -1217,7 +1208,7 @@ pub fn render_button_editor_modal(
 
                     ui.add_space(6.0);
                     ui.label(
-                        RichText::new("CUSTOM IMAGE / TRANSPARENT ARTWORK")
+                        RichText::new("CUSTOM IMAGE")
                             .size(10.5)
                             .strong()
                             .color(label_muted),
@@ -1563,7 +1554,8 @@ fn draw_preset_icon_tile(
 }
 
 /// Draws a prominent, visually distinct full-width matte card for uploading a custom image
-/// (`.png`, `.webp`, `.svg`, `.ico`, `.jpg`), including a live thumbnail preview when active.
+/// (`.png`, `.webp`, `.svg`, `.ico`, `.jpg`), including a live thumbnail preview and
+/// full multi-line text wrapping (`break_anywhere = true`) for long filenames and file paths.
 fn draw_prominent_upload_button(
     ui: &mut Ui,
     current_icon: &IconSource,
@@ -1571,16 +1563,65 @@ fn draw_prominent_upload_button(
     theme: ThemeMode,
     icon_cache: &mut IconCache,
 ) -> egui::Response {
-    let desired = Vec2::new(ui.available_width(), 54.0);
+    let avail_w = ui.available_width();
+    let is_custom = matches!(current_icon, IconSource::CustomPath(_));
+    let [ar, ag, ab, _] = accent.to_array();
+
+    let (title_col, sub_col) = match theme {
+        ThemeMode::Dark => (Color32::WHITE, Color32::from_rgb(168, 175, 192)),
+        ThemeMode::Light => (
+            Color32::from_rgb(18, 20, 26),
+            Color32::from_rgb(75, 80, 94),
+        ),
+    };
+
+    let (primary_text, secondary_text) = if let IconSource::CustomPath(ref path) = current_icon {
+        let fname = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("custom_image");
+        (
+            format!("Custom Image: {}", fname),
+            path.display().to_string(),
+        )
+    } else {
+        (
+            "Upload Custom Image…".to_string(),
+            "Supports transparent .PNG, .WEBP, .SVG, .ICO, .JPG".to_string(),
+        )
+    };
+
+    // Wrap both filename and file path cleanly between the left thumbnail (56px) and right CTA button (88px)
+    let text_max_width = (avail_w - 56.0 - 88.0).max(110.0);
+
+    let mut primary_job = egui::text::LayoutJob::simple(
+        primary_text,
+        FontId::new(12.2, FontFamily::Proportional),
+        title_col,
+        text_max_width,
+    );
+    primary_job.wrap.break_anywhere = true;
+    let primary_galley = ui.fonts(|f| f.layout_job(primary_job));
+
+    let mut secondary_job = egui::text::LayoutJob::simple(
+        secondary_text,
+        FontId::new(10.4, FontFamily::Proportional),
+        sub_col,
+        text_max_width,
+    );
+    secondary_job.wrap.break_anywhere = true;
+    let secondary_galley = ui.fonts(|f| f.layout_job(secondary_job));
+
+    let text_block_h = primary_galley.size().y + 3.0 + secondary_galley.size().y;
+    let card_h = (text_block_h + 16.0).max(56.0);
+
+    let desired = Vec2::new(avail_w, card_h);
     let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
     if resp.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
 
-    let is_custom = matches!(current_icon, IconSource::CustomPath(_));
-    let [ar, ag, ab, _] = accent.to_array();
-
-    let (bg_fill, border_col, title_col, sub_col, badge_bg) = match theme {
+    let (bg_fill, border_col, badge_bg) = match theme {
         ThemeMode::Dark => {
             let bg = if resp.hovered() {
                 Color32::from_rgba_unmultiplied(ar, ag, ab, 32)
@@ -1597,8 +1638,6 @@ fn draw_prominent_upload_button(
             (
                 bg,
                 border,
-                Color32::WHITE,
-                Color32::from_rgb(182, 188, 204),
                 Color32::from_rgba_unmultiplied(ar, ag, ab, 48),
             )
         }
@@ -1611,8 +1650,6 @@ fn draw_prominent_upload_button(
             (
                 bg,
                 accent,
-                Color32::from_rgb(18, 20, 26),
-                Color32::from_rgb(75, 80, 94),
                 Color32::from_rgba_unmultiplied(ar, ag, ab, 36),
             )
         }
@@ -1672,38 +1709,20 @@ fn draw_prominent_upload_button(
         );
     }
 
-    let (primary_text, secondary_text) = if let IconSource::CustomPath(ref path) = current_icon {
-        let fname = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("custom_image");
-        (
-            format!("Custom Image: {}", fname),
-            "Click to upload a different image (.png, .webp, .svg, .ico, .jpg)".to_string(),
-        )
-    } else {
-        (
-            "Upload Custom Image / Artwork…".to_string(),
-            "Supports transparent .PNG, .WEBP, .SVG, .ICO, .JPG".to_string(),
-        )
-    };
-
-    ui.painter().text(
-        Pos2::new(rect.left() + 56.0, rect.center().y - 7.5),
-        Align2::LEFT_CENTER,
-        primary_text,
-        FontId::new(13.0, FontFamily::Proportional),
+    let text_top_y = rect.center().y - text_block_h * 0.5;
+    let text_left_x = rect.left() + 56.0;
+    ui.painter().galley(
+        Pos2::new(text_left_x, text_top_y),
+        primary_galley.clone(),
         title_col,
     );
-    ui.painter().text(
-        Pos2::new(rect.left() + 56.0, rect.center().y + 8.5),
-        Align2::LEFT_CENTER,
-        secondary_text,
-        FontId::new(10.8, FontFamily::Proportional),
+    ui.painter().galley(
+        Pos2::new(text_left_x, text_top_y + primary_galley.size().y + 3.0),
+        secondary_galley,
         sub_col,
     );
 
-    // Right-side "Browse…" pill badge inside the upload card
+    // Right-side "Browse…" / "Change" pill badge inside the upload card
     let cta_rect = Rect::from_center_size(
         Pos2::new(rect.right() - 44.0, rect.center().y),
         Vec2::new(68.0, 24.0),
