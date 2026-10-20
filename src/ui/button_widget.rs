@@ -3,9 +3,20 @@ use egui::{
 };
 
 use crate::audio::EndpointDirection;
-use crate::config::{ButtonConfig, IconSource, ThemeMode};
+use crate::config::{parse_hex_color, ButtonConfig, IconSource, ThemeMode};
 use crate::ui::icons::IconCache;
 use crate::ui::theme::{button_font_family, resolve_button_palette};
+
+/// Transient pop-up overlay shown briefly on a button card while scrolling volume or middle-clicking mute.
+#[derive(Debug, Clone, Copy)]
+pub struct ButtonVolumePopup {
+    /// Current volume percentage (`0..=100`).
+    pub volume_pct: u32,
+    /// Whether the endpoint is currently muted.
+    pub is_muted: bool,
+    /// Animated opacity (`0.0..=1.0`) for smooth fade-out.
+    pub opacity: f32,
+}
 
 /// Computed proportional metrics for a button of cell size `(width, height)`.
 #[derive(Debug, Clone, Copy)]
@@ -79,7 +90,8 @@ pub fn compute_ellipsis_menu_rect(cell_rect: Rect, scale_s: f32) -> Rect {
 
 /// Renders a single proportionally scaled audio device button inside `cell_rect`
 /// using the **Linear / Raycast Matte Obsidian** aesthetic (uniform matte carbon card,
-/// crisp 1px hairline border, subtle icon well, and flush studio rectangular LED indicator).
+/// subtle animated Studio VU background meter, crisp 1px hairline border, subtle icon well,
+/// flush studio rectangular LED indicator, and brief scroll-wheel volume popup HUD).
 #[allow(clippy::too_many_arguments)]
 pub fn draw_audio_button(
     ui: &mut Ui,
@@ -90,6 +102,8 @@ pub fn draw_audio_button(
     is_device_present: bool,
     is_pressed: bool,
     is_being_dragged: bool,
+    vu_level: f32,
+    volume_popup: Option<ButtonVolumePopup>,
     theme_mode: ThemeMode,
     edit_mode: bool,
     icon_cache: &mut IconCache,
@@ -120,24 +134,29 @@ pub fn draw_audio_button(
     );
 
     let draw_rect = if is_being_dragged {
-        cell_rect.shrink(2.0)
+        cell_rect
     } else if is_pressed && !menu_hovered {
         cell_rect.shrink(1.0)
     } else {
         cell_rect
     };
 
-    let painter = ui.painter_at(cell_rect.expand(7.0 * metrics.scale_s));
+    let painter = ui.painter_at(cell_rect.expand(10.0 * metrics.scale_s));
     let rounding = Rounding::same(metrics.corner_radius);
 
     // 1. Subtle soft elevation shadow & optional active halo
-    let shadow_offset = Vec2::new(0.0, (1.5 * metrics.scale_s).clamp(1.0, 3.0));
+    let shadow_offset = if is_being_dragged {
+        Vec2::new(0.0, (4.5 * metrics.scale_s).clamp(3.0, 8.0))
+    } else {
+        Vec2::new(0.0, (1.5 * metrics.scale_s).clamp(1.0, 3.0))
+    };
+    let shadow_alpha = if is_being_dragged { 145 } else { 90 };
     painter.rect_filled(
         draw_rect.translate(shadow_offset),
         rounding,
         match theme_mode {
-            ThemeMode::Dark => Color32::from_rgba_unmultiplied(0, 0, 0, 90),
-            ThemeMode::Light => Color32::from_rgba_unmultiplied(15, 23, 42, 18),
+            ThemeMode::Dark => Color32::from_rgba_unmultiplied(0, 0, 0, shadow_alpha),
+            ThemeMode::Light => Color32::from_rgba_unmultiplied(15, 23, 42, shadow_alpha / 4),
         },
     );
 
@@ -162,6 +181,21 @@ pub fn draw_audio_button(
         )
     };
     painter.rect_filled(draw_rect, rounding, body_fill);
+
+    // 2b. Subtle, Silky-Smooth Animated Studio VU Meter on the Background of the Button Card
+    if vu_level > 0.004 && !is_muted {
+        let [ar, ag, ab] = parse_hex_color(&btn.color_hex).unwrap_or([59, 130, 246]);
+        draw_studio_vu_background(
+            &painter,
+            draw_rect,
+            rounding,
+            metrics.corner_radius,
+            vu_level.clamp(0.0, 1.0),
+            [ar, ag, ab],
+            is_active,
+            theme_mode,
+        );
+    }
 
     // 3. Crisp 1px Hairline Border + Single Top-Edge Rim Highlight
     let stroke_width = if is_being_dragged {
@@ -314,7 +348,7 @@ pub fn draw_audio_button(
             label_pos,
             Align2::CENTER_CENTER,
             display_title,
-            FontId::new(metrics.label_font_size, btn_font),
+            FontId::new(metrics.label_font_size, btn_font.clone()),
             palette.text_color,
         );
     }
@@ -352,6 +386,236 @@ pub fn draw_audio_button(
         painter.circle_filled(Pos2::new(cx, cy), dot_r, dot_color);
         painter.circle_filled(Pos2::new(cx, cy + dot_spacing), dot_r, dot_color);
     }
+
+    // 10. Brief Scroll-Wheel Volume / Middle-Click Mute HUD Pop-Up Overlay
+    if let Some(popup) = volume_popup {
+        if popup.opacity > 0.01 {
+            let [ar, ag, ab] = parse_hex_color(&btn.color_hex).unwrap_or([59, 130, 246]);
+            draw_volume_popup_overlay(
+                &painter,
+                draw_rect,
+                metrics.scale_s,
+                popup,
+                [ar, ag, ab],
+                &btn_font,
+                theme_mode,
+            );
+        }
+    }
+}
+
+/// Renders a subtle, silky-smooth animated Studio VU meter on the background of the button card.
+/// Uses a multi-band vertical gradient rising from the bottom of the card with a delicate illuminated crest line.
+#[allow(clippy::too_many_arguments)]
+fn draw_studio_vu_background(
+    painter: &egui::Painter,
+    draw_rect: Rect,
+    _rounding: Rounding,
+    corner_radius: f32,
+    vu_level: f32,
+    accent_rgb: [u8; 3],
+    is_active: bool,
+    theme_mode: ThemeMode,
+) {
+    let inner = draw_rect.shrink(1.2);
+    if inner.width() <= 4.0 || inner.height() <= 4.0 {
+        return;
+    }
+
+    let max_vu_h = inner.height() * 0.88;
+    let fill_h = (max_vu_h * vu_level).clamp(1.5, max_vu_h);
+    let top_y = inner.bottom() - fill_h;
+
+    // Blend the button's custom accent color with a touch of studio emerald when active
+    let [r, g, b] = if is_active {
+        [
+            ((accent_rgb[0] as u16 * 3 + 34) / 4) as u8,
+            ((accent_rgb[1] as u16 * 3 + 197) / 4) as u8,
+            ((accent_rgb[2] as u16 * 3 + 94) / 4) as u8,
+        ]
+    } else {
+        accent_rgb
+    };
+
+    let clipped = painter.with_clip_rect(inner);
+    let bands = 10usize;
+    let band_h = fill_h / (bands as f32);
+
+    for i in 0..bands {
+        // i = 0 is bottom band, i = bands - 1 is top crest band
+        let t = (i as f32 + 0.5) / (bands as f32);
+        let base_alpha = match theme_mode {
+            ThemeMode::Dark => 10.0 + t * 28.0 * (0.55 + 0.45 * vu_level),
+            ThemeMode::Light => 14.0 + t * 34.0 * (0.55 + 0.45 * vu_level),
+        };
+        let alpha = (base_alpha.round() as u8).clamp(6, 54);
+        let y_max = inner.bottom() - (i as f32) * band_h;
+        let y_min = (y_max - band_h - 0.6).max(top_y);
+        let band_rect = Rect::from_min_max(
+            Pos2::new(inner.left(), y_min),
+            Pos2::new(inner.right(), y_max),
+        );
+        let band_rounding = if i == 0 {
+            Rounding {
+                nw: 0.0,
+                ne: 0.0,
+                sw: (corner_radius - 1.2).max(2.0),
+                se: (corner_radius - 1.2).max(2.0),
+            }
+        } else {
+            Rounding::ZERO
+        };
+        clipped.rect_filled(
+            band_rect,
+            band_rounding,
+            Color32::from_rgba_unmultiplied(r, g, b, alpha),
+        );
+    }
+
+    // Soft illuminated studio VU crest horizon line at top_y
+    let crest_inset = if top_y > inner.bottom() - corner_radius {
+        (corner_radius * 0.55).max(3.0)
+    } else {
+        2.0
+    };
+    if inner.width() > crest_inset * 2.5 {
+        let crest_alpha = ((42.0 + 56.0 * vu_level).round() as u8).clamp(32, 105);
+        clipped.line_segment(
+            [
+                Pos2::new(inner.left() + crest_inset, top_y),
+                Pos2::new(inner.right() - crest_inset, top_y),
+            ],
+            Stroke::new(1.15, Color32::from_rgba_unmultiplied(r, g, b, crest_alpha)),
+        );
+    }
+}
+
+/// Renders a brief, auto-fading **Linear / Raycast Matte Obsidian** volume/mute HUD pill
+/// over the lower portion of the button card when scrolling the wheel or middle-clicking.
+fn draw_volume_popup_overlay(
+    painter: &egui::Painter,
+    draw_rect: Rect,
+    scale_s: f32,
+    popup: ButtonVolumePopup,
+    accent_rgb: [u8; 3],
+    btn_font: &egui::FontFamily,
+    theme_mode: ThemeMode,
+) {
+    let alpha_f = popup.opacity.clamp(0.0, 1.0);
+    let scale_alpha = |a: u8| -> u8 { ((a as f32) * alpha_f).round().clamp(0.0, 255.0) as u8 };
+
+    let pill_w = (draw_rect.width() * 0.84).clamp(48.0, 148.0);
+    let pill_h = (24.0 * scale_s).clamp(19.0, 30.0);
+    let bottom_margin = (6.5 * scale_s).clamp(4.5, 10.0);
+    let pill_rect = Rect::from_center_size(
+        Pos2::new(
+            draw_rect.center().x,
+            draw_rect.bottom() - bottom_margin - pill_h * 0.5,
+        ),
+        Vec2::new(pill_w, pill_h),
+    );
+    let pill_rounding = Rounding::same((6.0 * scale_s).clamp(4.5, 8.0));
+
+    let [ar, ag, ab] = if popup.is_muted {
+        [239, 68, 68]
+    } else {
+        accent_rgb
+    };
+
+    let (bg_col, border_col, text_col, track_bg) = match theme_mode {
+        ThemeMode::Dark => (
+            Color32::from_rgba_unmultiplied(11, 12, 16, scale_alpha(238)),
+            Color32::from_rgba_unmultiplied(ar, ag, ab, scale_alpha(195)),
+            if popup.is_muted {
+                Color32::from_rgba_unmultiplied(252, 165, 165, scale_alpha(255))
+            } else {
+                Color32::from_rgba_unmultiplied(248, 250, 252, scale_alpha(255))
+            },
+            Color32::from_rgba_unmultiplied(34, 38, 48, scale_alpha(230)),
+        ),
+        ThemeMode::Light => (
+            Color32::from_rgba_unmultiplied(250, 251, 254, scale_alpha(244)),
+            Color32::from_rgba_unmultiplied(ar, ag, ab, scale_alpha(185)),
+            if popup.is_muted {
+                Color32::from_rgba_unmultiplied(220, 38, 38, scale_alpha(255))
+            } else {
+                Color32::from_rgba_unmultiplied(15, 23, 42, scale_alpha(255))
+            },
+            Color32::from_rgba_unmultiplied(214, 218, 228, scale_alpha(230)),
+        ),
+    };
+
+    painter.rect_filled(pill_rect, pill_rounding, bg_col);
+    painter.rect_stroke(pill_rect, pill_rounding, Stroke::new(1.0, border_col));
+
+    let label_text = if popup.is_muted {
+        "MUTED".to_string()
+    } else {
+        format!("VOL {}%", popup.volume_pct.min(100))
+    };
+    let font_sz = (10.2 * scale_s).clamp(8.0, 12.8);
+    painter.text(
+        Pos2::new(pill_rect.center().x, pill_rect.top() + pill_h * 0.36),
+        Align2::CENTER_CENTER,
+        label_text,
+        FontId::new(font_sz, btn_font.clone()),
+        text_col,
+    );
+
+    // Mini horizontal studio progress bar inside the bottom of the HUD pill
+    let bar_pad_x = (7.0 * scale_s).clamp(5.0, 10.0);
+    let bar_h = (3.2 * scale_s).clamp(2.4, 4.2);
+    let bar_y = pill_rect.bottom() - (4.2 * scale_s).clamp(3.2, 5.6);
+    let track_rect = Rect::from_min_max(
+        Pos2::new(pill_rect.left() + bar_pad_x, bar_y - bar_h),
+        Pos2::new(pill_rect.right() - bar_pad_x, bar_y),
+    );
+    let bar_rounding = Rounding::same(bar_h * 0.5);
+    painter.rect_filled(track_rect, bar_rounding, track_bg);
+
+    let fill_ratio = if popup.is_muted {
+        0.0
+    } else {
+        (popup.volume_pct.min(100) as f32) / 100.0
+    };
+    if fill_ratio > 0.0 {
+        let fill_w = (track_rect.width() * fill_ratio).max(bar_h);
+        let fill_rect = Rect::from_min_size(track_rect.min, Vec2::new(fill_w, track_rect.height()));
+        painter.rect_filled(
+            fill_rect,
+            bar_rounding,
+            Color32::from_rgba_unmultiplied(ar, ag, ab, scale_alpha(240)),
+        );
+    }
+}
+
+/// Renders a recessed **Linear / Raycast Matte Obsidian** drop-target slot in the grid
+/// while a button tile is actively being dragged to reorder.
+pub fn draw_drop_target_slot(
+    ui: &mut Ui,
+    cell_rect: Rect,
+    accent_hex: &str,
+    theme_mode: ThemeMode,
+) {
+    let metrics = ProportionalButtonMetrics::compute(cell_rect.width(), cell_rect.height(), true);
+    let slot_rect = cell_rect.shrink(2.0);
+    let rounding = Rounding::same(metrics.corner_radius);
+    let [ar, ag, ab] = parse_hex_color(accent_hex).unwrap_or([59, 130, 246]);
+
+    let (slot_fill, slot_border) = match theme_mode {
+        ThemeMode::Dark => (
+            Color32::from_rgba_unmultiplied(ar, ag, ab, 18),
+            Color32::from_rgba_unmultiplied(ar, ag, ab, 150),
+        ),
+        ThemeMode::Light => (
+            Color32::from_rgba_unmultiplied(ar, ag, ab, 24),
+            Color32::from_rgba_unmultiplied(ar, ag, ab, 165),
+        ),
+    };
+
+    let painter = ui.painter_at(cell_rect.expand(4.0));
+    painter.rect_filled(slot_rect, rounding, slot_fill);
+    painter.rect_stroke(slot_rect, rounding, Stroke::new(1.5, slot_border));
 }
 
 /// Draws a flush, modern studio-equipment rectangular LED indicator near the top-center of a button:

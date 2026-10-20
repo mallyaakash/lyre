@@ -41,12 +41,119 @@ pub fn config_file_path() -> PathBuf {
 /// If the file does not exist or has no buttons yet, seeds buttons from the active `AudioSnapshot`.
 pub fn load_or_init_config(snapshot: &AudioSnapshot) -> AppConfig {
     let path = config_file_path();
-    load_from_path(&path).unwrap_or_else(|_| {
+    let mut cfg = load_from_path(&path).unwrap_or_else(|_| {
         let mut cfg = AppConfig::default();
         seed_buttons_from_snapshot(&mut cfg, snapshot);
         let _ = save_to_path(&cfg, &path);
         cfg
-    })
+    });
+    cfg.window.launch_at_startup = is_launch_at_startup_enabled();
+    cfg
+}
+
+const STARTUP_RUN_SUBKEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+const STARTUP_VALUE_NAME: &str = "Lyre";
+
+/// Checks whether Lyre is currently registered in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+pub fn is_launch_at_startup_enabled() -> bool {
+    use windows::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER, KEY_READ,
+    };
+    use windows_core::PCWSTR;
+
+    let subkey: Vec<u16> = STARTUP_RUN_SUBKEY
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let val_name: Vec<u16> = STARTUP_VALUE_NAME
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe {
+        let mut hkey = HKEY::default();
+        if RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(subkey.as_ptr()),
+            0,
+            KEY_READ,
+            &mut hkey,
+        )
+        .is_err()
+        {
+            return false;
+        }
+        let mut data_len: u32 = 0;
+        let exists = RegQueryValueExW(
+            hkey,
+            PCWSTR(val_name.as_ptr()),
+            None,
+            None,
+            None,
+            Some(&mut data_len),
+        )
+        .is_ok()
+            && data_len > 2;
+        let _ = RegCloseKey(hkey);
+        exists
+    }
+}
+
+/// Registers or unregisters Lyre in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+pub fn set_launch_at_startup(enabled: bool) -> Result<(), String> {
+    use windows::Win32::System::Registry::{
+        RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
+        KEY_SET_VALUE, REG_SZ,
+    };
+    use windows_core::PCWSTR;
+
+    let subkey: Vec<u16> = STARTUP_RUN_SUBKEY
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let val_name: Vec<u16> = STARTUP_VALUE_NAME
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe {
+        let mut hkey = HKEY::default();
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(subkey.as_ptr()),
+            0,
+            KEY_SET_VALUE,
+            &mut hkey,
+        )
+        .ok()
+        .map_err(|e| format!("Failed to open HKCU Run registry key: {}", e))?;
+
+        let result = if enabled {
+            let exe_path = std::env::current_exe()
+                .map_err(|e| format!("Failed to resolve current executable path: {}", e))?;
+            let quoted = format!("\"{}\"", exe_path.display());
+            let wide_data: Vec<u16> = quoted.encode_utf16().chain(std::iter::once(0)).collect();
+            let byte_slice = std::slice::from_raw_parts(
+                wide_data.as_ptr() as *const u8,
+                wide_data.len() * std::mem::size_of::<u16>(),
+            );
+            RegSetValueExW(
+                hkey,
+                PCWSTR(val_name.as_ptr()),
+                0,
+                REG_SZ,
+                Some(byte_slice),
+            )
+            .ok()
+            .map_err(|e| format!("Failed to write startup registry value: {}", e))
+        } else {
+            let _ = RegDeleteValueW(hkey, PCWSTR(val_name.as_ptr()));
+            Ok(())
+        };
+
+        let _ = RegCloseKey(hkey);
+        result
+    }
 }
 
 pub fn load_from_path(path: &Path) -> Result<AppConfig, String> {

@@ -9,7 +9,7 @@ use crate::audio::AudioEngine;
 use crate::config::{self, AppConfig, ThemeMode};
 use crate::tray::win32_window;
 use crate::tray::{TrayCommand, TrayManager};
-use crate::ui::grid::{render_button_grid, GridEvent};
+use crate::ui::grid::{render_button_grid, trigger_button_volume_popup, GridEvent};
 use crate::ui::icons::IconCache;
 use crate::ui::settings_panel::{
     render_button_editor_modal, render_context_menu_viewport, render_top_config_bar,
@@ -128,6 +128,43 @@ impl LyreApp {
                     }
                     self.mark_config_dirty();
                 }
+            }
+            Err(err) => {
+                self.editor.status_message = Some(err);
+            }
+        }
+    }
+
+    fn toggle_mute_button_by_index(&mut self, ctx: &Context, btn_idx: usize) {
+        let Some(btn) = self.config.buttons.get(btn_idx).cloned() else {
+            return;
+        };
+        match self.audio.toggle_mute_device(&btn.device_id, btn.direction) {
+            Ok(is_muted) => {
+                self.editor.status_message = None;
+                let vol_pct = (self.audio.get_device_volume(&btn.device_id) * 100.0).round() as u32;
+                trigger_button_volume_popup(ctx, &btn.id, vol_pct, is_muted);
+            }
+            Err(err) => {
+                self.editor.status_message = Some(err);
+            }
+        }
+    }
+
+    fn adjust_volume_by_index(&mut self, ctx: &Context, btn_idx: usize, delta_pct: i32) {
+        let Some(btn) = self.config.buttons.get(btn_idx).cloned() else {
+            return;
+        };
+        let delta_scalar = (delta_pct as f32) / 100.0;
+        match self
+            .audio
+            .adjust_device_volume(&btn.device_id, btn.direction, delta_scalar)
+        {
+            Ok(new_scalar) => {
+                self.editor.status_message = None;
+                let vol_pct = (new_scalar * 100.0).round() as u32;
+                let is_muted = self.audio.is_device_muted(&btn.device_id, btn.direction);
+                trigger_button_volume_popup(ctx, &btn.id, vol_pct, is_muted);
             }
             Err(err) => {
                 self.editor.status_message = Some(err);
@@ -467,6 +504,16 @@ impl eframe::App for LyreApp {
                             self.editor.context_menu = None;
                             self.switch_button_by_index(btn_idx);
                         }
+                        GridEvent::ToggleMuteDevice(btn_idx) => {
+                            self.editor.context_menu = None;
+                            self.toggle_mute_button_by_index(ctx, btn_idx);
+                        }
+                        GridEvent::AdjustVolume {
+                            button_idx,
+                            delta_pct,
+                        } => {
+                            self.adjust_volume_by_index(ctx, button_idx, delta_pct);
+                        }
                         GridEvent::EditButton(idx) => {
                             self.editor.context_menu = None;
                             self.editor.selected_button_idx = Some(idx);
@@ -523,6 +570,9 @@ impl eframe::App for LyreApp {
             ContextMenuAction::None => {}
             ContextMenuAction::SwitchButton(idx) => {
                 self.switch_button_by_index(idx);
+            }
+            ContextMenuAction::ToggleMuteButton(idx) => {
+                self.toggle_mute_button_by_index(ctx, idx);
             }
             ContextMenuAction::EditButton(idx) => {
                 if idx < self.config.buttons.len() {
@@ -588,10 +638,26 @@ impl eframe::App for LyreApp {
                 }
                 self.mark_config_dirty();
             }
+            ContextMenuAction::ToggleVuMeter => {
+                self.config.window.show_vu_meter = !self.config.window.show_vu_meter;
+                self.mark_config_dirty();
+            }
             ContextMenuAction::ToggleAlwaysOnTop => {
                 self.config.window.always_on_top = !self.config.window.always_on_top;
                 self.sync_window_mode(ctx);
                 self.mark_config_dirty();
+            }
+            ContextMenuAction::ToggleLaunchAtStartup => {
+                let target = !self.config.window.launch_at_startup;
+                match config::set_launch_at_startup(target) {
+                    Ok(()) => {
+                        self.config.window.launch_at_startup = target;
+                        self.mark_config_dirty();
+                    }
+                    Err(err) => {
+                        self.editor.status_message = Some(err);
+                    }
+                }
             }
             ContextMenuAction::HideToTray => {
                 self.set_visibility(ctx, false);

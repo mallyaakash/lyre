@@ -1,5 +1,5 @@
 use windows::Win32::Foundation::BOOL;
-use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+use windows::Win32::Media::Audio::Endpoints::{IAudioEndpointVolume, IAudioMeterInformation};
 use windows::Win32::Media::Audio::{
     eConsole, EDataFlow, IMMDevice, IMMDeviceEnumerator, DEVICE_STATE_ACTIVE,
 };
@@ -82,6 +82,116 @@ pub fn is_endpoint_id_muted(enumerator: &IMMDeviceEnumerator, device_id: &str) -
         };
         get_device_mute(&dev).unwrap_or(false)
     }
+}
+
+/// Sets the mute state on a specific endpoint ID via `IAudioEndpointVolume::SetMute`.
+pub fn set_endpoint_id_mute(
+    enumerator: &IMMDeviceEnumerator,
+    device_id: &str,
+    mute: bool,
+) -> Result<(), String> {
+    let wide: Vec<u16> = device_id.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let dev = enumerator
+            .GetDevice(windows_core::PCWSTR(wide.as_ptr()))
+            .map_err(|e| format!("IMMDeviceEnumerator::GetDevice failed: {}", e))?;
+        set_device_mute(&dev, mute)
+    }
+}
+
+/// Sets the mute state on the current default endpoint for `data_flow`.
+pub fn set_default_endpoint_mute(
+    enumerator: &IMMDeviceEnumerator,
+    data_flow: EDataFlow,
+    mute: bool,
+) -> Result<(), String> {
+    unsafe {
+        let dev = enumerator
+            .GetDefaultAudioEndpoint(data_flow, eConsole)
+            .map_err(|e| format!("GetDefaultAudioEndpoint failed: {}", e))?;
+        set_device_mute(&dev, mute)
+    }
+}
+
+/// Gets the master volume scalar (`0.0..=1.0`) for a specific endpoint ID.
+pub fn get_endpoint_id_volume_scalar(
+    enumerator: &IMMDeviceEnumerator,
+    device_id: &str,
+) -> Option<f32> {
+    let wide: Vec<u16> = device_id.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let dev = enumerator
+            .GetDevice(windows_core::PCWSTR(wide.as_ptr()))
+            .ok()?;
+        let vol: IAudioEndpointVolume = dev.Activate(CLSCTX_ALL, None).ok()?;
+        let scalar = vol.GetMasterVolumeLevelScalar().ok()?;
+        Some(scalar.clamp(0.0, 1.0))
+    }
+}
+
+/// Sets the master volume scalar (`0.0..=1.0`) for a specific endpoint ID and returns the new scalar.
+pub fn set_endpoint_id_volume_scalar(
+    enumerator: &IMMDeviceEnumerator,
+    device_id: &str,
+    scalar: f32,
+) -> Result<f32, String> {
+    let clamped = (scalar.clamp(0.0, 1.0) * 100.0).round() / 100.0;
+    let wide: Vec<u16> = device_id.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let dev = enumerator
+            .GetDevice(windows_core::PCWSTR(wide.as_ptr()))
+            .map_err(|e| format!("IMMDeviceEnumerator::GetDevice failed: {}", e))?;
+        let vol: IAudioEndpointVolume = dev
+            .Activate(CLSCTX_ALL, None)
+            .map_err(|e| format!("IMMDevice::Activate(IAudioEndpointVolume) failed: {}", e))?;
+        vol.SetMasterVolumeLevelScalar(clamped, std::ptr::null())
+            .map_err(|e| format!("SetMasterVolumeLevelScalar failed: {}", e))?;
+        Ok(clamped)
+    }
+}
+
+/// Adjusts the master volume scalar (`0.0..=1.0`) for a specific endpoint ID by `delta` (e.g. `±0.02`)
+/// and returns the new volume scalar (`0.0..=1.0`).
+pub fn adjust_endpoint_id_volume_scalar(
+    enumerator: &IMMDeviceEnumerator,
+    device_id: &str,
+    delta: f32,
+) -> Result<f32, String> {
+    let current = get_endpoint_id_volume_scalar(enumerator, device_id).unwrap_or(0.5);
+    let current_pct = (current * 100.0).round();
+    let delta_pct = (delta * 100.0).round();
+    let target_pct = (current_pct + delta_pct).clamp(0.0, 100.0);
+    set_endpoint_id_volume_scalar(enumerator, device_id, target_pct / 100.0)
+}
+
+/// Reads the live audio peak meter value (`0.0..=1.0`) for a specific endpoint ID via `IAudioMeterInformation::GetPeakValue`.
+pub fn get_endpoint_id_peak_value(enumerator: &IMMDeviceEnumerator, device_id: &str) -> f32 {
+    let wide: Vec<u16> = device_id.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let Ok(dev) = enumerator.GetDevice(windows_core::PCWSTR(wide.as_ptr())) else {
+            return 0.0;
+        };
+        get_device_peak(&dev).unwrap_or(0.0)
+    }
+}
+
+/// Reads the live audio peak meter value (`0.0..=1.0`) for the current default endpoint in `data_flow`.
+pub fn get_default_endpoint_peak_value(
+    enumerator: &IMMDeviceEnumerator,
+    data_flow: EDataFlow,
+) -> f32 {
+    unsafe {
+        let Ok(dev) = enumerator.GetDefaultAudioEndpoint(data_flow, eConsole) else {
+            return 0.0;
+        };
+        get_device_peak(&dev).unwrap_or(0.0)
+    }
+}
+
+unsafe fn get_device_peak(device: &IMMDevice) -> Option<f32> {
+    let meter: IAudioMeterInformation = device.Activate(CLSCTX_ALL, None).ok()?;
+    let peak = meter.GetPeakValue().ok()?;
+    Some(peak.clamp(0.0, 1.0))
 }
 
 unsafe fn get_device_mute(device: &IMMDevice) -> Option<bool> {

@@ -178,7 +178,15 @@
 - [x] **13.3** Remove `"Transparent Artwork"` text so the section header is `"CUSTOM IMAGE"` and the upload button title is `"Upload Custom Image…"` (`src/ui/settings_panel.rs`).
 - [x] **13.4** **Verification Gate 13:** Run `cargo test`, build release binary (`cargo build --release`), commit to Git, and launch.
 
+### Checkpoint 14: Scroll-Wheel Volume Control (2% Steps + Brief HUD), Middle-Click Device Mute, Toggleable Studio VU Background Meter, Drag-and-Drop Grid Reordering & Launch at Startup
+- [x] **14.1** Implement Hover + Scroll-Wheel Volume Control in **2% increments** (`IAudioEndpointVolume::SetMasterVolumeLevelScalar` in `src/audio/volume.rs` & `src/audio/mod.rs`) with a brief auto-fading **Linear / Raycast Matte Obsidian** volume HUD popup (`draw_volume_popup_overlay` in `src/ui/button_widget.rs`, `trigger_button_volume_popup` in `src/ui/grid.rs`).
+- [x] **14.2** Implement Middle-Click (Scroll-Wheel Click) on any button card to mute/unmute that single device (`GridEvent::ToggleMuteDevice`, `AudioEngine::toggle_mute_device`, plus `"Mute This Device"` toggle in the right-click context menu).
+- [x] **14.3** Implement a subtle, silky-smooth animated **Studio VU Meter** on the background of button cards (`IAudioMeterInformation::GetPeakValue`, fast attack + exponential decay ballistics, `draw_studio_vu_background`), toggleable via the top menu bar (`VU: On / Off` with `ToolbarIcon::VuMeter`) and right-click context menu (`Studio VU Background Meter`).
+- [x] **14.4** Upgrade Drag-and-Drop Button Reordering on the grid with a recessed **Drop Target Slot** (`draw_drop_target_slot`) and a floating card preview that glides smoothly with the cursor (`src/ui/grid.rs`).
+- [x] **14.5** Implement **Launch at Windows Startup** toggle (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registry integration in `src/config/mod.rs`, exposed in the right-click context menu).
+- [x] **14.6** **Verification Gate 14:** Run `cargo test`, build release binary (`cargo build --release`), commit to Git, and launch.
+
 ---
 
 ## Checkpoint Progress Log
-- **Current Phase:** All Checkpoints (0 through 13) Completed and Verified.
+- **Current Phase:** All Checkpoints (0 through 14) Completed and Verified.

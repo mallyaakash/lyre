@@ -165,6 +165,16 @@ pub struct WindowState {
     pub theme_mode: ThemeMode,
     /// Global override or default for showing labels (`true` = per-button `show_label` respected; can also bulk toggle).
     pub visible: bool,
+    /// Whether to display the subtle, silky-smooth animated Studio VU meter on the background of button cards.
+    #[serde(default = "default_true")]
+    pub show_vu_meter: bool,
+    /// Whether Lyre is registered in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` to launch at Windows login.
+    #[serde(default)]
+    pub launch_at_startup: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for WindowState {
@@ -179,6 +189,8 @@ impl Default for WindowState {
             columns: 3,
             theme_mode: ThemeMode::Dark,
             visible: true,
+            show_vu_meter: true,
+            launch_at_startup: false,
         }
     }
 }

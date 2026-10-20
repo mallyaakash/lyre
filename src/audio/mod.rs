@@ -248,6 +248,79 @@ impl AudioEngine {
         dir_muted && self.is_device_active(device_id, direction)
     }
 
+    /// Toggles Mute on a single specific audio endpoint (`device_id`) and returns the new mute state (`true` = muted).
+    /// If the user is unmuting the currently active device and the default endpoint for its direction
+    /// (e.g., SteelSeries Sonar virtual endpoint) was also muted, unmutes the default endpoint too.
+    pub fn toggle_mute_device(
+        &mut self,
+        device_id: &str,
+        direction: EndpointDirection,
+    ) -> Result<bool, String> {
+        ensure_com_initialized();
+        let currently_muted = self.is_device_muted(device_id, direction);
+        let target_mute = !currently_muted;
+        volume::set_endpoint_id_mute(&self.enumerator, device_id, target_mute)?;
+
+        if !target_mute && self.is_device_active(device_id, direction) {
+            let data_flow = match direction {
+                EndpointDirection::Output => eRender,
+                EndpointDirection::Input => eCapture,
+            };
+            let _ = volume::set_default_endpoint_mute(&self.enumerator, data_flow, false);
+        }
+        self.signal.notify_change();
+        Ok(target_mute)
+    }
+
+    /// Returns the current master volume scalar (`0.0..=1.0`) for `device_id`.
+    pub fn get_device_volume(&self, device_id: &str) -> f32 {
+        volume::get_endpoint_id_volume_scalar(&self.enumerator, device_id).unwrap_or(0.0)
+    }
+
+    /// Adjusts the volume of `device_id` by `delta` (e.g., `±0.02` for 2% steps) and returns the new scalar (`0.0..=1.0`).
+    /// If scrolling up (`delta > 0.0`) on a muted device, also unmutes that device so audio is audible.
+    pub fn adjust_device_volume(
+        &mut self,
+        device_id: &str,
+        direction: EndpointDirection,
+        delta: f32,
+    ) -> Result<f32, String> {
+        ensure_com_initialized();
+        let new_vol = volume::adjust_endpoint_id_volume_scalar(&self.enumerator, device_id, delta)?;
+        if delta > 0.0 && self.is_device_muted(device_id, direction) {
+            let _ = volume::set_endpoint_id_mute(&self.enumerator, device_id, false);
+            if self.is_device_active(device_id, direction) {
+                let data_flow = match direction {
+                    EndpointDirection::Output => eRender,
+                    EndpointDirection::Input => eCapture,
+                };
+                let _ = volume::set_default_endpoint_mute(&self.enumerator, data_flow, false);
+            }
+        }
+        self.signal.notify_change();
+        Ok(new_vol)
+    }
+
+    /// Reads the live audio peak meter value (`0.0..=1.0`) for `device_id`.
+    /// When `device_id` is the active device (including via SteelSeries Sonar redirection),
+    /// also takes the maximum with the default endpoint's peak meter so virtual-routed audio
+    /// animates the active button's Studio VU meter seamlessly.
+    pub fn get_device_peak_level(&self, device_id: &str, direction: EndpointDirection) -> f32 {
+        if self.is_device_muted(device_id, direction) {
+            return 0.0;
+        }
+        let mut peak = volume::get_endpoint_id_peak_value(&self.enumerator, device_id);
+        if self.is_device_active(device_id, direction) {
+            let data_flow = match direction {
+                EndpointDirection::Output => eRender,
+                EndpointDirection::Input => eCapture,
+            };
+            let def_peak = volume::get_default_endpoint_peak_value(&self.enumerator, data_flow);
+            peak = peak.max(def_peak);
+        }
+        peak.clamp(0.0, 1.0)
+    }
+
     /// Returns `true` if the given endpoint ID is currently the active Output or Input device.
     /// - When SteelSeries Sonar is active and serving as the Windows Default device, this highlights
     ///   the physical hardware device that Sonar is currently routing audio to (`game` for Output, `mic` for Input).

@@ -38,6 +38,7 @@ pub struct ContextMenuState {
 pub enum ContextMenuAction {
     None,
     SwitchButton(usize),
+    ToggleMuteButton(usize),
     EditButton(usize),
     DuplicateButton(usize),
     DeleteButton(usize),
@@ -47,7 +48,9 @@ pub enum ContextMenuAction {
     ToggleMinimalist,
     ToggleTheme,
     ToggleLabels,
+    ToggleVuMeter,
     ToggleAlwaysOnTop,
+    ToggleLaunchAtStartup,
     HideToTray,
     QuitApp,
 }
@@ -75,11 +78,11 @@ impl EditorState {
         target_button_idx: Option<usize>,
         pixels_per_point: f32,
     ) {
-        let menu_w = 292.0;
+        let menu_w = 296.0;
         let menu_h = if target_button_idx.is_some() {
-            504.0
+            592.0
         } else {
-            356.0
+            416.0
         };
         let spawn_pos = compute_same_monitor_cursor_menu_pos(
             main_hwnd.unwrap_or(0),
@@ -105,6 +108,7 @@ pub enum ToolbarIcon {
     ThemeMoon,
     ThemeSun,
     TextLabel,
+    VuMeter { active: bool },
     Speaker { muted: bool },
     Microphone { muted: bool },
     ColumnsGrid,
@@ -156,6 +160,21 @@ pub fn draw_toolbar_icon(
                 [Pos2::new(center.x - 2.4, center.y + 4.5), Pos2::new(center.x + 2.4, center.y + 4.5)],
                 Stroke::new(1.4, color),
             );
+        }
+        ToolbarIcon::VuMeter { active } => {
+            let bar_col = if active {
+                Color32::from_rgb(34, 197, 94)
+            } else {
+                color
+            };
+            // 3 vertical studio equalizer / VU bars
+            for (dx, h) in [(-4.0, 5.2), (0.0, 9.6), (4.0, 7.0)] {
+                let bar = Rect::from_min_max(
+                    Pos2::new(center.x + dx - 1.1, center.y + 4.8 - h),
+                    Pos2::new(center.x + dx + 1.1, center.y + 4.8),
+                );
+                painter.rect_filled(bar, Rounding::same(0.9), bar_col);
+            }
         }
         ToolbarIcon::Speaker { muted } => {
             // Speaker body + cone
@@ -692,6 +711,26 @@ pub fn render_top_config_bar(
             for b in &mut config.buttons {
                 b.show_label = target;
             }
+            changed = true;
+        }
+
+        // Studio VU Background Meter Toggle
+        let vu_on = config.window.show_vu_meter;
+        let vu_label = if vu_on { "VU: On" } else { "VU: Off" };
+        if pill_button_with_icon(
+            ui,
+            Some(ToolbarIcon::VuMeter { active: vu_on }),
+            vu_label,
+            vu_on,
+            false,
+            false,
+            true,
+            theme,
+        )
+        .on_hover_text("Toggle the live animated Studio VU meter on the background of button cards")
+        .clicked()
+        {
+            config.window.show_vu_meter = !config.window.show_vu_meter;
             changed = true;
         }
 
@@ -1761,8 +1800,8 @@ pub fn render_context_menu_viewport(
     }
 
     let has_target_btn = menu_state.target_button_idx.is_some();
-    let menu_w = 292.0;
-    let menu_h = if has_target_btn { 504.0 } else { 356.0 };
+    let menu_w = 296.0;
+    let menu_h = if has_target_btn { 592.0 } else { 416.0 };
     let theme = config.window.theme_mode;
 
     let viewport_id = ViewportId::from_hash_of("lyre_context_menu_viewport");
@@ -1785,14 +1824,17 @@ pub fn render_context_menu_viewport(
     let minimalist_mode = config.window.minimalist_mode;
     let dark_mode = theme == ThemeMode::Dark;
     let labels_shown = config.buttons.iter().any(|b| b.show_label);
+    let vu_meter_shown = config.window.show_vu_meter;
     let always_on_top = config.window.always_on_top;
+    let launch_at_startup = config.window.launch_at_startup;
 
     let target_btn_info = menu_state.target_button_idx.and_then(|idx| {
         config.buttons.get(idx).map(|b| {
             let [r, g, b_ch] = parse_hex_color(&b.color_hex).unwrap_or([59, 130, 246]);
             let accent = Color32::from_rgb(r, g, b_ch);
             let is_active = audio.is_device_active(&b.device_id, b.direction);
-            (idx, b.title.clone(), b.direction, accent, is_active)
+            let is_muted = audio.is_device_muted(&b.device_id, b.direction);
+            (idx, b.title.clone(), b.direction, accent, is_active, is_muted)
         })
     });
 
@@ -1843,7 +1885,7 @@ pub fn render_context_menu_viewport(
 
         let default_accent = target_btn_info
             .as_ref()
-            .map(|(_, _, _, acc, _)| *acc)
+            .map(|(_, _, _, acc, _, _)| *acc)
             .unwrap_or(Color32::from_rgb(59, 130, 246));
 
         CentralPanel::default()
@@ -1868,8 +1910,11 @@ pub fn render_context_menu_viewport(
 
                 // ── Top Header Bar (Draggable + Close '×' Pill) ────────────────────
                 ui.horizontal(|ui| {
-                    if let Some((_, ref title, dir, accent, is_active)) = target_btn_info {
-                        let dot_col = if is_active {
+                    if let Some((_, ref title, dir, accent, is_active, is_muted)) = target_btn_info
+                    {
+                        let dot_col = if is_muted {
+                            Color32::from_rgb(239, 68, 68)
+                        } else if is_active {
                             Color32::from_rgb(34, 197, 94)
                         } else {
                             accent
@@ -1946,7 +1991,7 @@ pub fn render_context_menu_viewport(
                     .inner_margin(Margin::symmetric(6.0, 5.0));
 
                 // ── Section 1: Target Button Actions (when right-clicking a button) ──
-                if let Some((idx, _, _, accent, is_active)) = target_btn_info {
+                if let Some((idx, _, _, accent, is_active, is_muted)) = target_btn_info {
                     group_frame.show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 2.0;
 
@@ -1967,6 +2012,19 @@ pub fn render_context_menu_viewport(
                         {
                             chosen_action = ContextMenuAction::SwitchButton(idx);
                             should_close = true;
+                        }
+
+                        if draw_context_toggle_row(
+                            ui,
+                            "Mute This Device",
+                            is_muted,
+                            Color32::from_rgb(239, 68, 68),
+                            Some("Mid-Click"),
+                            theme,
+                        )
+                        .clicked()
+                        {
+                            chosen_action = ContextMenuAction::ToggleMuteButton(idx);
                         }
 
                         if draw_context_action_row(
@@ -2120,6 +2178,19 @@ pub fn render_context_menu_viewport(
 
                     if draw_context_toggle_row(
                         ui,
+                        "Studio VU Background Meter",
+                        vu_meter_shown,
+                        Color32::from_rgb(34, 197, 94),
+                        None,
+                        theme,
+                    )
+                    .clicked()
+                    {
+                        chosen_action = ContextMenuAction::ToggleVuMeter;
+                    }
+
+                    if draw_context_toggle_row(
+                        ui,
                         "Always on Top",
                         always_on_top,
                         default_accent,
@@ -2129,6 +2200,19 @@ pub fn render_context_menu_viewport(
                     .clicked()
                     {
                         chosen_action = ContextMenuAction::ToggleAlwaysOnTop;
+                    }
+
+                    if draw_context_toggle_row(
+                        ui,
+                        "Launch at Windows Startup",
+                        launch_at_startup,
+                        default_accent,
+                        None,
+                        theme,
+                    )
+                    .clicked()
+                    {
+                        chosen_action = ContextMenuAction::ToggleLaunchAtStartup;
                     }
                 });
 
