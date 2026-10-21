@@ -3,6 +3,15 @@
 **/*.rs.bk
 *.pdb
 
+# Local user config & secrets
+config.json
+config.json.tmp
+.env
+.env.*
+*.pem
+*.key
+*.log
+
 # OS / IDE metadata
 .DS_Store
 Thumbs.db
