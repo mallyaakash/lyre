@@ -12,6 +12,12 @@ config.json.tmp
 *.key
 *.log
 
+# Local agent instructions & custom user device images (keep only embedded fonts)
+/agent.md
+/assets/*
+!/assets/fonts/
+!/assets/fonts/**
+
 # OS / IDE metadata
 .DS_Store
 Thumbs.db
