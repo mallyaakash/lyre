@@ -1,5 +1,6 @@
 # Lyre
 
+<img width="760" height="760" alt="logo" src="https://github.com/user-attachments/assets/ca2ec17a-e640-4c10-869f-f7ab33af9081" />
 **Lyre** is a lightweight, ultra-fast Windows 10/11 desktop utility built in Rust for switching default audio output (`eRender`) and microphone input (`eCapture`) devices with a single click.
 
 Designed with a **Linear / Raycast Matte Obsidian** studio aesthetic, Lyre gives you a customizable hardware-style control deck on your desktop or system tray.
